@@ -3,8 +3,8 @@
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { inrCompact } from "@/lib/format";
 
-const COLORS = ["#2563eb", "#ea580c", "#7c3aed", "#16a34a",
-                "#db2777", "#ca8a04", "#0891b2", "#4f46e5"];
+const COLORS = ["#3d6479", "#c0392b", "#2f54d4", "#5bbcd6",
+                "#e08a1e", "#7b4fd1", "#2a9d8f", "#8fe3f5"];
 
 interface Slice {
   name: string;
@@ -19,7 +19,7 @@ export default function DrilldownDonut({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="w-full max-w-lg rounded-lg bg-white shadow-xl">
-        <div className="flex items-center justify-between bg-blue-700 px-5 py-3 rounded-t-lg">
+        <div className="flex items-center justify-between bg-nav px-5 py-3 rounded-t-lg">
           <h3 className="text-sm font-semibold text-white">{title}</h3>
           <button onClick={onClose} className="text-white/80 hover:text-white">✕</button>
         </div>
@@ -47,11 +47,11 @@ export default function DrilldownDonut({
           )}
         </div>
         <div className="flex items-center justify-between border-t border-slate-100 px-5 py-3">
-          <span className="text-sm font-semibold text-blue-700">
+          <span className="text-sm font-semibold text-nav">
             Total: {inrCompact(total)}
           </span>
           <button onClick={onClose}
-                  className="rounded bg-blue-700 px-4 py-1.5 text-sm text-white hover:bg-blue-800">
+                  className="rounded bg-brand px-4 py-1.5 text-sm text-white hover:bg-brand-dark">
             Close
           </button>
         </div>

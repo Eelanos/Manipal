@@ -46,7 +46,7 @@ export default function DataTable({ table }: { table: TableData }) {
     <div className="rounded-lg border border-slate-200 bg-white">
       <div className="border-b border-slate-200 p-3">
         <input
-          className="w-64 rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-sky-500 focus:outline-none"
+          className="w-64 rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-accent focus:outline-none"
           placeholder="Search..."
           value={query}
           onChange={(e) => { setQuery(e.target.value); setPage(0); }}

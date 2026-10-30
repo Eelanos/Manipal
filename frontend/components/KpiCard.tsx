@@ -10,7 +10,7 @@ const TONE: Record<string, string> = {
 
 export default function KpiCard({ kpi }: { kpi: Kpi }) {
   return (
-    <div className="flex flex-col rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="kpi-card flex flex-col rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
         {kpi.label}
       </p>

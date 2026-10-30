@@ -415,6 +415,32 @@ def closing_stock_by_dept(inv_df: pd.DataFrame) -> dict:
         ]
     return out
 
+def stock_and_days_by_unit(inv_df: pd.DataFrame, cons_df: pd.DataFrame) -> dict:
+    """Month -> one row per unit with its stock value and Inventory Days, for
+    the Consumption Trend drill-down. Inventory Days is the same formula as the
+    Inventory Days Trend (stock x days elapsed / consumption month-to-date),
+    just worked out per unit instead of for the whole scope."""
+    out: dict[str, list[dict]] = {}
+    for month, grp in inv_df.groupby("Month_Start"):
+        # Stock is a point-in-time measure: read the month's latest snapshot.
+        snap_date = grp["Date"].max()
+        snap = grp[grp["Date"] == snap_date]
+        month_start = snap_date.replace(day=1)
+        rows = []
+        for unit, ugrp in snap.groupby("Unit_Name"):
+            stock = float(ugrp["Stock_Value"].sum())
+            mtd = cons_df[(cons_df["Unit_Name"] == unit)
+                          & (cons_df["Date"] >= month_start)
+                          & (cons_df["Date"] <= snap_date)]["Value"].sum()
+            rows.append({
+                "Unit": unit,
+                "Stock": stock,
+                "Inventory Days": inventory_days(stock, float(mtd), snap_date.day),
+            })
+        rows.sort(key=lambda r: r["Stock"], reverse=True)
+        out[month.strftime("%b %y")] = rows
+    return out
+
 def off_formulary_items_by_month(df: pd.DataFrame) -> dict:
     """Month -> off-formulary item rows, for the compliance-trend drill-down."""
     out: dict[str, list[dict]] = {}

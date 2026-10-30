@@ -10,6 +10,8 @@ from app.schemas import Chart, ChartSeries, DashboardResponse, Kpi, Table
 
 router = APIRouter(prefix="/api", tags=["inventory"])
 
+AGE_ORDER = ["Below 30", "30 - 60", "60 - 90", "Above 90"]
+
 
 @router.get("/inventory-analysis", response_model=DashboardResponse)
 def inventory_dashboard(
@@ -62,7 +64,7 @@ def inventory_dashboard(
 
     charts = []
 
-    # 1. Inventory Days Trend - BUD (bar) + Actual (line).
+    # 1. Inventory Days Trend - Inventory Days (bars) + BUD (line).
     if len(days_series):
         act_map = dict(zip(days_series["Date"], days_series["inventory_days"]))
         bud_map = dict(zip(budget_days_series["Date"], budget_days_series["budget_inventory_days"])) \
@@ -71,38 +73,35 @@ def inventory_dashboard(
         charts.append(Chart(
             id="inventory_days_trend", title="Inventory Days Trend",
             type="combo", x_key="month", value_format="number",
+            # "combo" draws the FIRST series as bars and the rest as lines, so
+            # Inventory Days goes first (bars) and BUD second (line).
             series=[
-                ChartSeries(name="BUD", data=[
-                    {"month": m.strftime("%b %y"), "value": float(bud_map.get(m, 0))}
-                    for m in months]),
                 ChartSeries(name="Inventory Days", data=[
                     {"month": m.strftime("%b %y"), "value": float(act_map[m])}
+                    for m in months]),
+                ChartSeries(name="BUD", data=[
+                    {"month": m.strftime("%b %y"), "value": float(bud_map.get(m, 0))}
                     for m in months]),
             ],
             drilldown=metrics.inventory_days_by_dept(df, cons),
         ))
 
-    # 2. Inventory Value & HIS Consumption Trend - Value (bar) + Cons (line).
-    stock_m = df.groupby("Month_Start", as_index=False)["Stock_Value"].sum()
-    cons_m = metrics.monthly_trend(cons)
-    if len(stock_m) and len(cons_m):
-        s_map = dict(zip(stock_m["Month_Start"], stock_m["Stock_Value"]))
-        c_map = dict(zip(cons_m["Month_Start"], cons_m["Value"]))
-        months = sorted(set(s_map) | set(c_map))
-        charts.append(Chart(
-            id="value_vs_consumption",
-            title="Inventory Value & HIS Consumption Trend",
-            type="combo", x_key="month",
-            series=[
-                ChartSeries(name="Inventory Value", data=[
-                    {"month": m.strftime("%b %y"), "value": float(s_map.get(m, 0))}
-                    for m in months]),
-                ChartSeries(name="HIS Consumption", data=[
-                    {"month": m.strftime("%b %y"), "value": float(c_map.get(m, 0))}
-                    for m in months]),
-            ],
-            drilldown=metrics.his_consumption_by_dept(cons),
-        ))
+    # 2. Closing Stock Ageing (Cr) - monthly stacked bar (moved here from the
+    # Consumption page).
+    age_rows = []
+    for month, grp in df.groupby("Month_Start"):
+        row = {"month": month.strftime("%b %y")}
+        for bucket in AGE_ORDER:
+            row[bucket] = float(grp.loc[grp["Ageing"] == bucket, "Stock_Value"].sum())
+        age_rows.append(row)
+    charts.append(Chart(
+        id="closing_stock_ageing", title="Closing Stock Ageing (Cr)",
+        type="stacked_bar", x_key="month",
+        series=[ChartSeries(name=b, data=[
+            {"month": r["month"], "value": r[b]} for r in age_rows])
+            for b in AGE_ORDER],
+        drilldown=metrics.closing_stock_by_dept(df),
+    ))
 
     # 3. Non Moving Inventory Trend (%).
     nm_rows = []

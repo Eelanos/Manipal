@@ -12,7 +12,7 @@ from app.config import (ALLOWED_ORIGINS, AS_OF_DATE, DATA_END, DATA_START,
                         STOCK_TAKE_GROUPS, TIER_LABELS)
 from app.data_loader import get_store
 from app.filters import PRESETS
-from app.routers import (consumption, formulary, inventory,
+from app.routers import (consumption, formulary, inventory, rca,
                          sob_compliance, sob_opportunities)
 
 
@@ -42,6 +42,15 @@ app.include_router(inventory.router)
 app.include_router(formulary.router)
 app.include_router(sob_opportunities.router)
 app.include_router(sob_compliance.router)
+app.include_router(rca.router)
+
+# "Ask Manipal" conversational layer. Additive and isolated: if it cannot load
+# (e.g. the openai package is not installed yet) the dashboards run unchanged.
+try:
+    from app.chat.router import router as chat_router
+    app.include_router(chat_router)
+except Exception as exc:  # pragma: no cover
+    print(f"[chat] Ask Manipal disabled: {exc}")
 
 
 @app.get("/api/health")

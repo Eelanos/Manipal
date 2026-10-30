@@ -4,21 +4,24 @@ import { useEffect, useState } from "react";
 import ChartPanel from "@/components/ChartPanel";
 import InsightCallout from "@/components/InsightCallout";
 import KpiCard from "@/components/KpiCard";
+import NavIcon from "@/components/NavIcons";
 import { fetchDashboard } from "@/lib/api";
+import { useFavorites } from "@/lib/favorites";
 import { useFilters } from "@/lib/filter-context";
 import type { DashboardResponse } from "@/lib/types";
 
 interface Props {
   slug: string;
   title: string;
-  subtitle: string;
 }
 
 // Every dashboard renders through this one component. Filters are no longer
 // owned here - they live once, in the sidebar (see layout.tsx +
 // lib/filter-context.tsx), so switching pages never resets them.
-export default function DashboardPage({ slug, title, subtitle }: Props) {
+export default function DashboardPage({ slug, title }: Props) {
   const { filters } = useFilters();
+  const { favorites, toggle } = useFavorites();
+  const isFavorite = favorites.includes(slug);
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -34,9 +37,17 @@ export default function DashboardPage({ slug, title, subtitle }: Props) {
 
   return (
     <div className="space-y-5">
-      <header>
+      <header className="flex items-center gap-2">
         <h1 className="text-2xl font-semibold text-slate-900">{title}</h1>
-        <p className="text-sm text-slate-500">{subtitle}</p>
+        {/* Star: saves this dashboard to Favorites (click again to remove). */}
+        <button type="button" onClick={() => toggle(slug)}
+                aria-pressed={isFavorite}
+                aria-label={isFavorite ? "Remove from favorites" : "Save to favorites"}
+                title={isFavorite ? "Remove from favorites" : "Save to favorites"}
+                className={`rounded-md p-1.5 transition hover:bg-white ${
+                  isFavorite ? "text-amber-500" : "text-slate-400 hover:text-amber-500"}`}>
+          <NavIcon name="favorites" size={20} filled={isFavorite} />
+        </button>
       </header>
 
       {error && (

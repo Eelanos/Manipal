@@ -70,3 +70,22 @@ if _deployed:
 # this list just scopes what DataStore surfaces right now. Nothing else
 # changes: switch this back to all 12 to bring the rest of the network back.
 ACTIVE_UNITS = ["H010", "H011"]  # Pune, Goa
+
+# --- Root cause analysis (RCA) --------------------------------------------
+# Every threshold the RCA tab uses lives here. These are DISPLAY and FLAGGING
+# rules, not business facts: the client should confirm them. None of them
+# changes a calculated number - they only decide the label shown next to it.
+RCA_TOP_N = 5                  # contributors listed per dimension (the rest are grouped as "All other")
+RCA_MIN_HISTORY_MONTHS = 8     # fewer comparable months than this => no "is it unusual" verdict is given
+RCA_Z_UNUSUAL = 2.0            # |z| >= this => "Unusual" versus the metric's own history
+RCA_Z_WATCH = 1.0              # |z| >= this (below UNUSUAL) => "Watch"
+RCA_CONCENTRATED_PCT = 60.0    # one value explains >= this % of the change => "Concentrated"
+RCA_MODERATE_PCT = 30.0        # >= this % => "Moderate"; below => "Spread out"
+RCA_MATERIAL_SHARE_PCT = 10.0  # KPI tree: a branch must explain >= this % of the change to be flagged
+RCA_NEGLIGIBLE_DELTA = 1e-9    # |change| below this is treated as "no change" (shares are not computed)
+RCA_MIN_RELATIVE_CHANGE_PCT = 0.25  # a net change smaller than this % of the comparison value is "flat": shares of it are not shown
+
+# Stock classes used by the Inventory Days KPI tree. Each stock line is counted
+# in exactly ONE class, the first that applies, so the classes add up to total
+# stock. Order = precedence.
+RCA_STOCK_CLASS_ORDER = ["Expired", "Near expiry", "Non-moving", "Healthy"]

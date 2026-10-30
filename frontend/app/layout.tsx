@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import FilterBar from "@/components/FilterBar";
 import Sidebar from "@/components/Sidebar";
+import ChatDock from "@/components/chat/ChatDock";
 import { fetchFilterOptions } from "@/lib/api";
 import { FilterProvider } from "@/lib/filter-context";
 import type { FilterOptions, FilterState } from "@/lib/types";
@@ -28,15 +30,24 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased">
-        <div className="flex h-screen overflow-hidden bg-slate-50">
-          <Sidebar options={options} filters={filters} onFiltersChange={setFilters} />
-          <main className="flex-1 overflow-y-auto overflow-x-hidden p-6">
-            {/* Pages read filters via a tiny context rather than fetching
-                their own - see lib/filter-context.tsx. */}
-            <FilterProvider value={{ filters, options }}>
-              {children}
-            </FilterProvider>
-          </main>
+        <div className="flex h-screen overflow-hidden bg-canvas">
+          <Sidebar />
+          <div className="flex min-w-0 flex-1 flex-col">
+            {/* Unit / Period / Stock Take Group / Department: one bar above
+                every page. Same height as the sidebar's brand block. */}
+            <div className="flex h-20 shrink-0 items-center border-b border-slate-200 bg-white px-6">
+              <FilterBar options={options} value={filters} onChange={setFilters} />
+            </div>
+            <main className="flex-1 overflow-y-auto overflow-x-hidden p-6">
+              {/* Pages read filters via a tiny context rather than fetching
+                  their own - see lib/filter-context.tsx. */}
+              <FilterProvider value={{ filters, options }}>
+                {children}
+              </FilterProvider>
+            </main>
+          </div>
+          {/* "Ask Manipal" chat: a floating button + panel (position: fixed), so it takes no layout space. */}
+          <ChatDock />
         </div>
       </body>
     </html>

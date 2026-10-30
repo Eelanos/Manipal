@@ -29,7 +29,7 @@ export interface Chart {
   series: ChartSeries[];
   reference_line: number | null;
   value_format: "currency" | "percent" | "number";
-  drilldown?: Record<string, { Department: string; Value: number }[] | { name: string; value: number }[]> | null;
+  drilldown?: Record<string, { Department: string; Value: number }[] | { name: string; value: number }[] | { Unit: string; Stock: number; "Inventory Days": number }[]> | null;
 }
 
 export interface TableColumn {

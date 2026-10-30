@@ -10,8 +10,6 @@ from app.schemas import Chart, ChartSeries, DashboardResponse, Kpi, Table
 
 router = APIRouter(prefix="/api", tags=["consumption"])
 
-AGE_ORDER = ["Below 30", "30 - 60", "60 - 90", "Above 90"]
-
 
 @router.get("/consumption", response_model=DashboardResponse)
 def consumption_dashboard(
@@ -62,45 +60,34 @@ def consumption_dashboard(
 
     charts = []
 
-    # 1. Consumption Trend - Budget vs Actual by month.
+    # Inventory is needed for the Consumption Trend drill-down (unit-wise stock
+    # and inventory days) and for the location-wise inventory chart below.
+    inv = apply(store.inventory, f, date_col="Date")
+
+    # 1. Consumption Trend - Actual (bars) vs Budget (line) by month.
     if bud_monthly is not None and len(bud_monthly):
         act_monthly = metrics.monthly_trend(df)
         bud_map = dict(zip(bud_monthly["Month_Start"], bud_monthly["Budget_Value"]))
         act_map = dict(zip(act_monthly["Month_Start"], act_monthly["Value"]))
         months = sorted(set(act_map) | set(bud_map))
         charts.append(Chart(
-            id="consumption_trend", title="Consumption Trend", type="line",
+            id="consumption_trend", title="Consumption Trend", type="combo",
             x_key="month",
+            # "combo" draws the FIRST series as bars and the rest as lines,
+            # so ACT goes first (bars) and BUD second (line).
             series=[
-                ChartSeries(name="BUD", data=[
-                    {"month": m.strftime("%b %y"), "value": float(bud_map.get(m, 0))}
-                    for m in months]),
                 ChartSeries(name="ACT", data=[
                     {"month": m.strftime("%b %y"), "value": float(act_map.get(m, 0))}
                     for m in months]),
+                ChartSeries(name="BUD", data=[
+                    {"month": m.strftime("%b %y"), "value": float(bud_map.get(m, 0))}
+                    for m in months]),
             ],
-            drilldown=metrics.his_consumption_by_dept(df),
+            # Click a month -> unit-wise stock and inventory days.
+            drilldown=metrics.stock_and_days_by_unit(inv, df),
         ))
 
-    # 2. Closing Stock Ageing (Cr) - monthly stacked bar, from inventory.
-    inv = apply(store.inventory, f, date_col="Date")
-    if len(inv):
-        rows = []
-        for month, grp in inv.groupby("Month_Start"):
-            row = {"month": month.strftime("%b %y")}
-            for bucket in AGE_ORDER:
-                row[bucket] = float(grp.loc[grp["Ageing"] == bucket, "Stock_Value"].sum())
-            rows.append(row)
-        charts.append(Chart(
-            id="closing_stock_ageing", title="Closing Stock Ageing (Cr)",
-            type="stacked_bar", x_key="month",
-            series=[ChartSeries(name=b, data=[
-                {"month": r["month"], "value": r[b]} for r in rows])
-                for b in AGE_ORDER],
-            drilldown=metrics.closing_stock_by_dept(inv),
-        ))
-
-    # 3. Top 10 by store location - consumption.
+    # 2. Top 10 by store location - consumption.
     # FAKE DIMENSION: Store_Location doesn't exist in real hospital data we
     # have; it's generated (add_store_location.py) to mirror the client's
     # location-level breakdown. Clearly labelled, not read off any document.
@@ -114,7 +101,7 @@ def consumption_dashboard(
             drilldown=metrics.consumption_by_item_for_location(df),
     ))
 
-    # 4. Top 10 by store location - inventory value (latest snapshot).
+    # 3. Top 10 by store location - inventory value (latest snapshot).
     if len(inv):
         as_on = inv["Date"].max()
         snap = inv[inv["Date"] == as_on]

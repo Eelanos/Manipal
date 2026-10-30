@@ -9,12 +9,12 @@ import type { Chart as ChartSpec } from "@/lib/types";
 import { useState } from "react";
 import DrilldownModal from "./DrilldownModal";
 import DrilldownDonut from "./DrilldownDonut";
+import DrilldownUnitModal from "./DrilldownUnitModal";
 
-// High-contrast categorical palette. Blue and green are now genuinely
-// different hues (not two teals that read as the same color at a glance).
-// Red is deliberately excluded - reserved for risk flags on KPI cards only.
-const COLORS = ["#0f4c75", "#8b2500", "#c9a227", "#5b7f5b",
-                "#3282b8", "#7a5c3e", "#4a4a4a", "#bbe1fa"];
+// Qber palette: dark teal, red, blue, cyan, orange, purple, green, light cyan.
+// Single-series bars take the first colour; the reference line stays red.
+const COLORS = ["#3d6479", "#c0392b", "#2f54d4", "#5bbcd6",
+                "#e08a1e", "#7b4fd1", "#2a9d8f", "#8fe3f5"];
 
 const MONTHS = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];  
@@ -48,17 +48,22 @@ export default function ChartPanel({ spec }: { spec: ChartSpec }) {
   const names = spec.series.map((s) => s.name);
   const data = mergeSeries(spec);
   const horizontal = spec.type === "hbar";
+  // Recharts' default [0, auto] domain mis-draws all-negative bars (they hang from a non-zero edge and
+  // look shorter than they are). Only when a series has negatives, anchor the axis so zero is always inside it.
+  const hasNegative = data.some((row) => names.some((n) => Number(row[n]) < 0));
+  const valueDomain: [(m: number) => number, (m: number) => number] | undefined = hasNegative
+    ? [(m) => Math.min(0, m), (m) => Math.max(0, m)] : undefined;
   const fmt = makeFormatter(spec.value_format);
   const [drillMonth, setDrillMonth] = useState<string | null>(null);
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4">
+    <div className="chart-card rounded-lg border border-slate-200 bg-white p-4">
       {/* Heading matches the legend below: same size, same weight, non-bold. */}
       <h3 className="mb-4 text-xs font-normal text-slate-700">{spec.title}</h3>
       <ResponsiveContainer width="100%" height={horizontal ? 360 : 280}>
         {spec.type === "combo" ? (
           // First series renders as bars, the rest as lines - one convention,
-          // used consistently (BUD as bars, Actual/Inventory Days as line).
+          // used consistently (actual as bars, BUD as the line).
           <ComposedChart data={data}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
             <XAxis dataKey="x" tick={{ fontSize: 11 }} />
@@ -118,14 +123,14 @@ export default function ChartPanel({ spec }: { spec: ChartSpec }) {
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
             {horizontal ? (
               <>
-                <XAxis type="number" tickFormatter={fmt} tick={{ fontSize: 11 }} />
+                <XAxis type="number" tickFormatter={fmt} tick={{ fontSize: 11 }} domain={valueDomain} />
                 <YAxis type="category" dataKey="x" width={160}
                        tick={{ fontSize: 11 }} />
               </>
             ) : (
               <>
                 <XAxis dataKey="x" tick={{ fontSize: 11 }} />
-                <YAxis tickFormatter={fmt} tick={{ fontSize: 11 }} width={80} />
+                <YAxis tickFormatter={fmt} tick={{ fontSize: 11 }} width={80} domain={valueDomain} />
               </>
             )}
             <Tooltip formatter={(v) => fmt(Number(v))}
@@ -148,6 +153,12 @@ export default function ChartPanel({ spec }: { spec: ChartSpec }) {
               : `Package/Formulary Mix — ${drillMonth}`
             }
             data={(spec.drilldown[drillMonth] ?? []) as { name: string; value: number }[]}
+            onClose={() => setDrillMonth(null)}
+          />
+        ) : spec.id === "consumption_trend" ? (
+          <DrilldownUnitModal
+            title={`Unit-wise Stock & Inventory Days — ${drillMonth}`}
+            rows={(spec.drilldown[drillMonth] ?? []) as { Unit: string; Stock: number; "Inventory Days": number }[]}
             onClose={() => setDrillMonth(null)}
           />
         ) : (

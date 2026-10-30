@@ -24,3 +24,23 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ---- Qber palette (brand red, slate-blue navigation, light canvas) ---- */
+@theme {
+  --color-brand: #a4262c;
+  --color-brand-dark: #861e23;
+  --color-nav: #3b4559;
+  --color-nav-dark: #2c3547;
+  --color-canvas: #eceef3;
+  --color-accent: #2f54d4;
+}
+
+/* KPI cards: coloured top edge that cycles red / blue / orange / teal / purple. */
+.kpi-card { border-top-width: 4px; border-top-color: var(--color-brand); }
+.kpi-card:nth-child(5n+2) { border-top-color: var(--color-accent); }
+.kpi-card:nth-child(5n+3) { border-top-color: #e08a1e; }
+.kpi-card:nth-child(5n+4) { border-top-color: #1f9bb0; }
+.kpi-card:nth-child(5n+5) { border-top-color: #7b4fd1; }
+
+/* Chart cards: dark slate top edge. */
+.chart-card { border-top-width: 4px; border-top-color: var(--color-nav); }
