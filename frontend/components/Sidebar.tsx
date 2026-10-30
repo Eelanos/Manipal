@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import NavIcon, { type NavIconName } from "@/components/NavIcons";
-import { DASHBOARDS, RCA_NAV } from "@/lib/nav";
+import { DASHBOARDS, PREDICT_NAV, RCA_NAV } from "@/lib/nav";
 
 // Nav item look: slate-blue sidebar, active item darker with a red left edge.
 const itemClass = (active: boolean) =>
@@ -60,6 +60,10 @@ export default function Sidebar() {
           <NavLink href={`/${RCA_NAV.slug}`} icon="rca"
                    active={path === `/${RCA_NAV.slug}`}>
             {RCA_NAV.title}
+          </NavLink>
+          <NavLink href={`/${PREDICT_NAV.slug}`} icon="predict"
+                   active={path === `/${PREDICT_NAV.slug}`}>
+            {PREDICT_NAV.title}
           </NavLink>
         </div>
 

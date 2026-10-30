@@ -33,3 +33,7 @@ export const DASHBOARDS: NavItem[] = [
 // dashboard links and the /api/<slug> fetches, and RCA has no backend
 // endpoint yet.
 export const RCA_NAV = { slug: "rca", title: "RCA" };
+
+// The Predictive Analysis tab (below RCA). Like RCA it is deliberately NOT in
+// DASHBOARDS: it has its own endpoints (/api/predict/*) and its own page.
+export const PREDICT_NAV = { slug: "predictive-analysis", title: "Predictive Analysis" };

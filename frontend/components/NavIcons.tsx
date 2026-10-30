@@ -3,7 +3,7 @@
 
 export type NavIconName =
   | "inventory-analysis" | "consumption" | "formulary-compliance"
-  | "sob-opportunities" | "sob-compliance" | "rca"
+  | "sob-opportunities" | "sob-compliance" | "rca" | "predict"
   | "favorites" | "ask" | "upload" | "refresh" | "execute";
 
 const PATHS: Record<NavIconName, React.ReactNode> = {
@@ -45,6 +45,12 @@ const PATHS: Record<NavIconName, React.ReactNode> = {
     <>
       <circle cx="11" cy="11" r="8" />
       <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </>
+  ),
+  predict: (
+    <>
+      <polyline points="3 17 9 11 13 15 21 7" />
+      <polyline points="15 7 21 7 21 13" />
     </>
   ),
   favorites: (

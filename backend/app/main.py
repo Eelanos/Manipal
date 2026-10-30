@@ -52,6 +52,14 @@ try:
 except Exception as exc:  # pragma: no cover
     print(f"[chat] Ask Manipal disabled: {exc}")
 
+# Predictive Analysis (rule-based demand & replenishment planning). Additive and
+# isolated, same guard as chat: if it cannot load, everything else runs unchanged.
+try:
+    from app.routers import predict as predict_router
+    app.include_router(predict_router.router)
+except Exception as exc:  # pragma: no cover
+    print(f"[predict] Predictive Analysis disabled: {exc}")
+
 
 @app.get("/api/health")
 def health():
