@@ -68,8 +68,10 @@ if _deployed:
 # Active hospital units for this presentation. The synthetic network has 12
 # units so the Region/Zone/Cluster hierarchy can be demoed in full later -
 # this list just scopes what DataStore surfaces right now. Nothing else
-# changes: switch this back to all 12 to bring the rest of the network back.
-ACTIVE_UNITS = ["H010", "H011"]  # Pune, Goa
+# changes: this is now all 12 units (it was Pune and Goa only).
+ACTIVE_UNITS = ["H001", "H002", "H003", "H004", "H005", "H006",
+                "H007", "H008", "H009", "H010", "H011", "H012"]   # all 12 units
+# The 2-unit demo scope was ["H010", "H011"]  # Pune, Goa  - set it back to that to restore it.
 
 # --- Root cause analysis (RCA) --------------------------------------------
 # Every threshold the RCA tab uses lives here. These are DISPLAY and FLAGGING
@@ -89,3 +91,6 @@ RCA_MIN_RELATIVE_CHANGE_PCT = 0.25  # a net change smaller than this % of the co
 # in exactly ONE class, the first that applies, so the classes add up to total
 # stock. Order = precedence.
 RCA_STOCK_CLASS_ORDER = ["Expired", "Near expiry", "Non-moving", "Healthy"]
+RCA_HOME_CARDS = 8               # entity cards on the RCA home screen (the rest are one click away in the explorer)
+RCA_MIN_OVERINDEX_PP = 5.0          # a segment is named a driver only if its share of a change is at least this many
+                                # points above its share of the base (a segment that is just big is not a finding)

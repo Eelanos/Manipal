@@ -1,6 +1,6 @@
 import { toQuery } from "./api";
 import type { FilterState } from "./types";
-import type { RcaAnalysis, RcaOptions, RcaTree } from "./rca-types";
+import type { RcaAnalysis, RcaEntityView, RcaLens, RcaOptions, RcaTree, TopCause } from "./rca-types";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
@@ -28,8 +28,26 @@ function query(p: Params, filters: FilterState, path: string[] = []): string {
   return q.toString();
 }
 
-export const fetchRcaAnalysis = (p: Params, f: FilterState, path: string[], signal?: AbortSignal) =>
-  getJson<RcaAnalysis>(`/api/rca/analysis?${query(p, f, path)}`, signal);
+export const fetchRcaAnalysis = (p: Params, f: FilterState, path: string[], signal?: AbortSignal, full = false) =>
+  getJson<RcaAnalysis>(`/api/rca/analysis?${query(p, f, path)}${full ? "&full=true" : ""}`, signal);
 
-export const fetchRcaTree = (p: Params, f: FilterState, signal?: AbortSignal) =>
-  getJson<RcaTree>(`/api/rca/tree?${query(p, f)}`, signal);
+export const fetchRcaTree = (p: Params, f: FilterState, signal?: AbortSignal, path: string[] = []) =>
+  getJson<RcaTree>(`/api/rca/tree?${query(p, f, path)}`, signal);
+
+// ---- command-center views --------------------------------------------------
+const withView = (p: Params, f: FilterState, extra: Record<string, string>) => {
+  const q = new URLSearchParams(query(p, f));
+  Object.entries(extra).forEach(([k, v]) => q.set(k, v));
+  return q.toString();
+};
+
+/** Every entity of one kind (all units, all doctors ...) with its part of the change. */
+export const fetchRcaLens = (p: Params, f: FilterState, dim: string, signal?: AbortSignal) =>
+  getJson<RcaLens>(`/api/rca/lens?${withView(p, f, { dim })}`, signal);
+
+/** The strongest driver inside one entity. Fetched per card so the cards can appear first. */
+export const fetchRcaCause = (p: Params, f: FilterState, dim: string, segment: string, signal?: AbortSignal) =>
+  getJson<{ segment: string; dim: string; top_cause: TopCause | null }>(`/api/rca/cause?${withView(p, f, { dim, segment })}`, signal);
+
+export const fetchRcaEntity = (p: Params, f: FilterState, dim: string, segment: string, signal?: AbortSignal) =>
+  getJson<RcaEntityView>(`/api/rca/entity?${withView(p, f, { dim, segment })}`, signal);

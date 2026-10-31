@@ -20,7 +20,8 @@ import math
 
 import pandas as pd
 
-from app.config import (RCA_CONCENTRATED_PCT, RCA_MIN_RELATIVE_CHANGE_PCT, RCA_MODERATE_PCT,
+from app.config import (RCA_CONCENTRATED_PCT, RCA_HOME_CARDS, RCA_MATERIAL_SHARE_PCT,
+                        RCA_MIN_OVERINDEX_PP, RCA_MIN_RELATIVE_CHANGE_PCT, RCA_MODERATE_PCT,
                         RCA_NEGLIGIBLE_DELTA, RCA_TOP_N)
 from app.filters import Filters
 from app.formatting import inr_compact
@@ -156,7 +157,7 @@ def headline_evidence(measure: Measure, sc: Scope, m: pd.Timestamp, base: Base) 
 
 
 def _segment_evidence(measure: Measure, base: Base, wide: pd.DataFrame | None,
-                      bwide: pd.DataFrame | None, seg: str, m: pd.Timestamp) -> dict:
+                      bwide: pd.DataFrame | None, seg: str, m: pd.Timestamp, with_history: bool = True) -> dict:
     if wide is None or seg not in wide.columns:
         return {"available": False, "reason": "No history for this segment."}
     bser = None
@@ -165,20 +166,46 @@ def _segment_evidence(measure: Measure, base: Base, wide: pd.DataFrame | None,
             return {"available": False, "reason": "No budget history for this segment."}
         bser = bwide[seg]
     q, basis = ev.quantity(measure.kind, wide[seg], base.key, bser)
-    return ev.verdict(q, m, basis, with_history=True)
+    return ev.verdict(q, m, basis, with_history=with_history)
+
+
+def entity_flag(contribution: float | None, gross: float | None, evd: dict) -> str:
+    """
+    How much attention a segment deserves: it must account for a material part of the total movement
+    (RCA_MATERIAL_SHARE_PCT of what ALL segments moved, ignoring direction) AND its own move must be
+    unusual against its own history. Anything less is "minor" / "normal" / "watch".
+    """
+    if contribution is None or not gross or gross <= 0 \
+            or abs(contribution) / gross * 100 < RCA_MATERIAL_SHARE_PCT:
+        return "minor"
+    if not evd.get("available"):
+        return "no_history"
+    return {"unusual": "deviating", "watch": "watch", "normal": "normal"}[evd["flag"]]
+
+
+def _slim(evd: dict) -> dict:
+    return {k: v for k, v in evd.items() if k != "history"}
 
 
 # --------------------------------------------------------------------------
 # One dimension -> ranked rows
 # --------------------------------------------------------------------------
 def dimension_block(measure: Measure, sc: Scope, dim: str, m: pd.Timestamp, base: Base,
-                    delta: float, negligible: bool) -> tuple[dict | None, Contribs]:
+                    delta: float, negligible: bool, full: bool = False,
+                    scale: float = 0.0, light: bool = False) -> tuple[dict | None, Contribs]:
+    """`full` lists EVERY segment instead of the top RCA_TOP_N; `scale` is the size of the KPI, used to
+    tell whether the slice itself moved enough to talk about its shares. `light` skips the per-segment
+    history check (used when only the sizes and shares are needed, e.g. a card's top driver)."""
     cb = measure.contributions(sc, dim, m, base)
     fr = cb.frame
     fr = fr[(fr["contribution"].abs() > 0) | (fr["own_current"].fillna(0).abs() > 0)]
     if len(fr) < 2:
         return None, cb
     sgn = 1.0 if delta >= 0 else -1.0
+    slice_total = float(fr["contribution"].sum())
+    slice_flat = abs(slice_total) < max(RCA_NEGLIGIBLE_DELTA, RCA_MIN_RELATIVE_CHANGE_PCT / 100.0 * abs(scale or 0.0))
+    gross = float(fr["contribution"].abs().sum())
+    wsum = float(fr["weight"].fillna(0).sum()) if "weight" in fr.columns else 0.0
 
     def share(c: float) -> float | None:
         return None if negligible else c / delta * 100
@@ -188,22 +215,30 @@ def dimension_block(measure: Measure, sc: Scope, dim: str, m: pd.Timestamp, base
     top1_share = None if negligible else top1 / abs(delta) * 100
     top3_share = None if negligible else float(aligned.sort_values(ascending=False).head(3).clip(lower=0).sum()) / abs(delta) * 100
 
-    order = fr["contribution"].abs().sort_values(ascending=False).index[:RCA_TOP_N]
+    order = fr["contribution"].abs().sort_values(ascending=False).index[: (None if full else RCA_TOP_N)]
     shown = fr.loc[order].assign(_k=lambda d: d["contribution"] * sgn).sort_values("_k", ascending=False)
 
-    wide = measure.seg_series(sc, dim)
-    bwide = measure.seg_budget_series(sc, dim) if base.kind == "budget" else None
+    wide = None if light else measure.seg_series(sc, dim)
+    bwide = measure.seg_budget_series(sc, dim) if (base.kind == "budget" and not light) else None
 
     rows = []
     for seg, r in shown.iterrows():
+        evd = ({"available": False, "reason": "Not computed for this view."} if light
+               else _segment_evidence(measure, base, wide, bwide, seg, m, with_history=not full))
         row = {
             "segment": seg,
             "contribution": num(r["contribution"]),
             "share_pct": num(share(r["contribution"])),
+            # Share of the SLICE's own change (the drilled segment), not of the whole KPI's change.
+            "share_of_slice_pct": None if slice_flat else num(r["contribution"] / slice_total * 100),
             "own_current": num(r["own_current"]),
             "own_base": num(r["own_base"]),
             "weight_pct": num(r["weight"]),
-            "evidence": _segment_evidence(measure, base, wide, bwide, seg, m),
+            # How big the segment is INSIDE the slice (what an even spread of the change would give it).
+            "weight_in_slice_pct": num(r["weight"] / wsum * 100) if wsum > 0 and pd.notna(r["weight"]) else None,
+            "evidence": evd,
+            "flag": entity_flag(num(r["contribution"]), gross, evd),
+            "tone": _tone(measure, float(r["contribution"]), False),
         }
         parts = {}
         if "stock_effect" in fr.columns:
@@ -231,9 +266,10 @@ def dimension_block(measure: Measure, sc: Scope, dim: str, m: pd.Timestamp, base
         "pattern": pattern_of(top1_share),
         # One segment moved MORE than the whole net change because others moved the other way.
         "offsets": bool(top1_share is not None and top1_share > 100.0),
-        "total": num(fr["contribution"].sum()),
+        "total": num(slice_total),
+        "slice_flat": bool(slice_flat),
         # Gross movement: how much the segments moved in total, ignoring direction.
-        "gross": num(fr["contribution"].abs().sum()),
+        "gross": num(gross),
         "biggest_up": ({"segment": fr["contribution"].idxmax(), "contribution": num(fr["contribution"].max())}
                        if fr["contribution"].max() > 0 else None),
         "biggest_down": ({"segment": fr["contribution"].idxmin(), "contribution": num(fr["contribution"].min())}
@@ -245,14 +281,32 @@ def dimension_block(measure: Measure, sc: Scope, dim: str, m: pd.Timestamp, base
 # --------------------------------------------------------------------------
 # The analysis
 # --------------------------------------------------------------------------
-def analyze(store, f: Filters, metric_key: str, month: str, compare_key: str,
-            path: list[str] | None = None) -> dict:
+def _cached(store, key: tuple, fn):
+    """
+    Results are pure functions of (data, request), and the data never changes while the server runs, so a
+    repeat request (the home screen asks for every card's top driver) is served from memory. The cache
+    lives ON the store, so a reloaded store starts empty.
+    """
+    cache = store.__dict__.setdefault("_rca_cache", {})
+    if key in cache:
+        return cache[key]
+    out = fn()
+    if len(cache) >= 600:
+        cache.clear()
+    cache[key] = out
+    return out
+
+
+def _fkey(f: Filters) -> tuple:
+    return tuple(sorted(f.as_dict().items()))
+
+
+def _root(store, f: Filters, metric_key: str, month: str, compare_key: str):
+    """The pieces every RCA question starts from: measure, month, comparison and the whole-scope numbers."""
     measure = get_measure(metric_key)
     months = months_available(store)
     m = parse_month(month, months)
     base = make_base(measure, compare_key, m, months)
-    conds = parse_path(path or [], measure, compare_key)
-
     root = Scope(store, f, [])
     if base.kind == "budget" and root.bud_reason:
         raise RcaError(root.bud_reason)
@@ -263,7 +317,35 @@ def analyze(store, f: Filters, metric_key: str, month: str, compare_key: str,
     if base_val is None:
         raise RcaError(f"No data for {base.label} in this scope.")
     delta = cur - base_val
-    negligible = is_flat(delta, base_val)
+    return measure, m, base, root, cur, base_val, delta, is_flat(delta, base_val)
+
+
+def _headline(measure: Measure, cur: float, base_val: float, delta: float, flat: bool) -> dict:
+    return {
+        "current": num(cur), "base": num(base_val), "delta": num(delta),
+        "delta_pct": None if (measure.kind == "ratio" or not base_val) else num(delta / base_val * 100),
+        "tone": _tone(measure, delta, flat), "flat": flat,
+    }
+
+
+def _metric_info(measure: Measure) -> dict:
+    return {"key": measure.key, "label": measure.label, "fmt": measure.fmt,
+            "unit_word": measure.unit_word, "higher_is": measure.higher_is,
+            "definition": measure.definition, "weight_label": measure.weight_label}
+
+
+def analyze(store, f: Filters, metric_key: str, month: str, compare_key: str,
+            path: list[str] | None = None, full: bool = False, light: bool = False) -> dict:
+    """`full` lists every segment of every dimension (the drill-down screen) instead of the top few.
+    `light` leaves out the per-segment "is it unusual" check (faster; the sizes and shares are identical)."""
+    key = ("analyze", metric_key, month, compare_key, tuple(path or []), full, light, _fkey(f))
+    return _cached(store, key, lambda: _analyze(store, f, metric_key, month, compare_key, path, full, light))
+
+
+def _analyze(store, f: Filters, metric_key: str, month: str, compare_key: str,
+             path: list[str] | None, full: bool, light: bool = False) -> dict:
+    measure, m, base, root, cur, base_val, delta, negligible = _root(store, f, metric_key, month, compare_key)
+    conds = parse_path(path or [], measure, compare_key)
 
     sc = root.with_conds(conds) if conds else root
     used = {d for d, _ in conds}
@@ -271,7 +353,8 @@ def analyze(store, f: Filters, metric_key: str, month: str, compare_key: str,
     for dim in measure.dims_for(compare_key):
         if dim in used:
             continue
-        block, cb = dimension_block(measure, sc, dim, m, base, delta, negligible)
+        block, cb = dimension_block(measure, sc, dim, m, base, delta, negligible, full=full,
+                                   scale=base_val, light=light)
         slice_totals.append(cb.slice_total)
         if not conds and not effects:
             effects = cb.effects
@@ -306,17 +389,11 @@ def analyze(store, f: Filters, metric_key: str, month: str, compare_key: str,
         suggestion = {"dim": best["key"], "dim_label": best["label"], "segment": best["top_segment"],
                       "share_pct": best["top1_share_pct"], "pattern": best["pattern"]}
 
-    headline = {
-        "current": num(cur), "base": num(base_val), "delta": num(delta),
-        "delta_pct": None if (measure.kind == "ratio" or not base_val) else num(delta / base_val * 100),
-        "tone": _tone(measure, delta, negligible), "flat": negligible,
-    }
+    headline = _headline(measure, cur, base_val, delta, negligible)
     evidence = headline_evidence(measure, root, m, base)
 
     out = {
-        "metric": {"key": measure.key, "label": measure.label, "fmt": measure.fmt,
-                   "unit_word": measure.unit_word, "higher_is": measure.higher_is,
-                   "definition": measure.definition, "weight_label": measure.weight_label},
+        "metric": _metric_info(measure),
         "period": {"month": m.strftime("%Y-%m"), "label": m.strftime("%b %Y")},
         "compare": {"key": base.key, "label": base.label,
                     "base_month": base.month.strftime("%Y-%m") if base.month is not None else None},
@@ -327,17 +404,174 @@ def analyze(store, f: Filters, metric_key: str, month: str, compare_key: str,
         "dimensions": blocks,
         "unavailable_dimensions": [
             {"key": k, "label": d.label,
-             "reason": ("budget is only set by unit and department" if compare_key == "budget"
+             "reason": ("budget is only set by unit, department, region and zone" if compare_key == "budget"
                         and k in measure.dims else "not recorded in this measure's data")}
             for k, d in DIMS.items()
             if k not in measure.dims_for(compare_key) and k not in used
         ],
         "chain": chain,
+        "slice_total": num(ref_total),
         "suggestion": suggestion,
         "evidence": evidence,
         "reconciliation": reconciliation,
     }
     out["narrative"] = narrate(measure, out)
+    return out
+
+
+# --------------------------------------------------------------------------
+# Lens: "every unit / region / doctor ... and how each one moved the number"
+# --------------------------------------------------------------------------
+def _adverse_first(measure: Measure, delta: float):
+    """Sort key putting the segments that hurt the KPI first (for neutral KPIs: those moving with the change)."""
+    if measure.higher_is == "better":
+        return lambda c: -c
+    if measure.higher_is == "worse":
+        return lambda c: c
+    sgn = 1.0 if delta >= 0 else -1.0
+    return lambda c: c * sgn
+
+
+def ranking_of(a: dict, limit: int = RCA_TOP_N) -> list[dict]:
+    """
+    The drivers INSIDE a slice (a drilled entity), across every dimension, strongest first.
+
+    A segment is listed only if (1) it carries at least RCA_MATERIAL_SHARE_PCT of the slice's own change
+    and (2) its share of that change exceeds its share of the base by RCA_MIN_OVERINDEX_PP points. (2) keeps
+    out the segments that are simply big: "Non-implant: 96% of the change" means nothing when Non-implant
+    is 95% of everything. Every figure is read from `a`; nothing is added.
+    """
+    items = []
+    for b in a["dimensions"]:
+        for r in b["rows"]:
+            s, w = r.get("share_of_slice_pct"), r.get("weight_in_slice_pct")
+            if s is None or s < RCA_MATERIAL_SHARE_PCT:
+                continue
+            if w is not None and s - w < RCA_MIN_OVERINDEX_PP:
+                continue
+            items.append({
+                "dim": b["key"], "dim_label": b["label"], "segment": r["segment"],
+                "contribution": r["contribution"], "share_of_slice_pct": s, "weight_in_slice_pct": w,
+                "own_current": r["own_current"], "own_base": r["own_base"],
+                "flag": r["flag"], "tone": r["tone"], "evidence": _slim(r["evidence"]),
+            })
+    items.sort(key=lambda x: -(x["share_of_slice_pct"] - (x["weight_in_slice_pct"] or 0.0)))
+    return items[:limit]
+
+
+def lens(store, f: Filters, metric_key: str, month: str, compare_key: str, dim_key: str,
+         cards: int = 0) -> dict:
+    """`cards` > 0 also fills in the top driver of that many entities (slower; the screen asks for them
+    one by one through cause() instead, so the cards appear at once)."""
+    key = ("lens", metric_key, month, compare_key, dim_key, cards, _fkey(f))
+    return _cached(store, key, lambda: _lens(store, f, metric_key, month, compare_key, dim_key, cards))
+
+
+def cause(store, f: Filters, metric_key: str, month: str, compare_key: str, dim_key: str, segment: str) -> dict:
+    """The strongest driver inside one entity (or None if no segment stands out beyond its own size)."""
+    key = ("cause", metric_key, month, compare_key, dim_key, segment, _fkey(f))
+
+    def run():
+        a = analyze(store, f, metric_key, month, compare_key, [f"{dim_key}:{segment}"], light=True)
+        top = ranking_of(a, 1)
+        return {"segment": segment, "dim": dim_key,
+                "top_cause": ({k: top[0][k] for k in ("dim", "dim_label", "segment", "share_of_slice_pct",
+                                                      "weight_in_slice_pct", "tone")} if top else None)}
+    return _cached(store, key, run)
+
+
+def _lens(store, f, metric_key, month, compare_key, dim_key, cards) -> dict:
+    measure, m, base, root, cur, base_val, delta, negligible = _root(store, f, metric_key, month, compare_key)
+    allowed = measure.dims_for(compare_key)
+    if dim_key not in DIMS:
+        raise RcaError(f"Unknown view '{dim_key}'.")
+    if dim_key not in allowed:
+        raise RcaError(f"{measure.label} cannot be split by {DIMS[dim_key].label.lower()}"
+                       f"{' when compared with budget' if compare_key == 'budget' else ''}.")
+    lenses = [{"key": d, "label": DIMS[d].label, "segments": measure.seg_count(root, d)} for d in allowed]
+    block, cb = dimension_block(measure, root, dim_key, m, base, delta, negligible, full=True, scale=base_val)
+
+    entities = []
+    if block:
+        key_fn = _adverse_first(measure, delta)
+        for r in block["rows"]:
+            own = (r["own_current"] - r["own_base"]) if r["own_current"] is not None and r["own_base"] is not None else None
+            entities.append({**r, "own_change": num(own), "evidence": _slim(r["evidence"]), "top_cause": None})
+        entities.sort(key=lambda x: -key_fn(x["contribution"] or 0.0))
+        # Each card's top driver comes from drilling that entity (cached, so repeat visits are instant).
+        for ent in entities[:max(0, cards)]:
+            try:
+                ent["top_cause"] = cause(store, f, metric_key, month, compare_key, dim_key, ent["segment"])["top_cause"]
+            except RcaError:
+                continue
+
+    effects = cb.effects
+    eff_total = sum(x["contribution"] for x in effects)
+    gap = abs(cb.slice_total + eff_total - delta)
+    tol = 1e-6 * max(1.0, abs(delta), abs(cur))
+    counts = {k: 0 for k in ("deviating", "watch", "normal", "minor", "no_history")}
+    for ent in entities:
+        counts[ent["flag"]] += 1
+    evidence = _slim(headline_evidence(measure, root, m, base))
+    headline = _headline(measure, cur, base_val, delta, negligible)
+    out = {
+        "metric": _metric_info(measure),
+        "period": {"month": m.strftime("%Y-%m"), "label": m.strftime("%b %Y")},
+        "compare": {"key": base.key, "label": base.label,
+                    "base_month": base.month.strftime("%Y-%m") if base.month is not None else None},
+        "scope": {"filters": f.as_dict()},
+        "headline": headline, "evidence": evidence,
+        "effects": [{"label": x["label"], "contribution": num(x["contribution"])} for x in effects],
+        "lens": {"key": dim_key, "label": DIMS[dim_key].label,
+                 "segments": next((x["segments"] for x in lenses if x["key"] == dim_key), 0)},
+        "lenses": lenses,
+        "entities": entities,
+        "summary": {
+            "count": len(entities), "flags": counts,
+            "top1_share_pct": block["top1_share_pct"] if block else None,
+            "top3_share_pct": block["top3_share_pct"] if block else None,
+            "pattern": block["pattern"] if block else None,
+            "offsets": block["offsets"] if block else False,
+            "gross": block["gross"] if block else None,
+            "biggest_up": block["biggest_up"] if block else None,
+            "biggest_down": block["biggest_down"] if block else None,
+        },
+        "reconciliation": {"ok": bool(gap <= tol), "max_gap": num(gap),
+                           "checked": "Every entity's part adds up to the change in the whole"},
+    }
+    out["narrative"] = narrate(measure, {**out, "dimensions": [block] if block else [], "scope": {"path": []}})
+    return out
+
+
+def entity(store, f: Filters, metric_key: str, month: str, compare_key: str, dim_key: str, segment: str) -> dict:
+    key = ("entity", metric_key, month, compare_key, dim_key, segment, _fkey(f))
+    return _cached(store, key, lambda: _entity(store, f, metric_key, month, compare_key, dim_key, segment))
+
+
+def _entity(store, f, metric_key, month, compare_key, dim_key, segment) -> dict:
+    """One entity (a unit, a doctor, a region...): how it moved, how unusual that is, and what drove it."""
+    measure, m, base, root, cur, base_val, delta, negligible = _root(store, f, metric_key, month, compare_key)
+    L = lens(store, f, metric_key, month, compare_key, dim_key)
+    row = next((x for x in L["entities"] if x["segment"] == segment), None)
+    if row is None:
+        raise RcaError(f"No {DIMS[dim_key].label.lower()} called '{segment}' in this scope.")
+    a = analyze(store, f, metric_key, month, compare_key, [f"{dim_key}:{segment}"])
+    # The entity's own history (for the "is it unusual" chart) - the lens list leaves it out to stay small.
+    wide = measure.seg_series(root, dim_key)
+    bwide = measure.seg_budget_series(root, dim_key) if base.kind == "budget" else None
+    own_evidence = _segment_evidence(measure, base, wide, bwide, segment, m, with_history=True)
+    ranking = ranking_of(a)
+    peers = L["summary"]
+    ent = {**row, "evidence": own_evidence, "dim": dim_key, "dim_label": DIMS[dim_key].label}
+    out = {
+        "metric": a["metric"], "period": a["period"], "compare": a["compare"],
+        "scope": a["scope"], "headline": a["headline"],
+        "entity": ent, "ranking": ranking,
+        "slice_total": a["slice_total"],
+        "peer_summary": {"count": peers["count"], "flags": peers["flags"]},
+        "reconciliation": a["reconciliation"],
+    }
+    out["narrative"] = narrate_entity(measure, out, a)
     return out
 
 
@@ -416,4 +650,42 @@ def narrate(measure: Measure, a: dict) -> list[str]:
                          f"so part of this may be seasonal.")
     else:
         lines.append(f"Not enough history to judge whether this is unusual ({e.get('reason', '')}).")
+    return lines
+
+
+def narrate_entity(measure: Measure, out: dict, a: dict) -> list[str]:
+    """What the numbers say about one entity, in the same fixed-template style as narrate()."""
+    ent, h, p, c = out["entity"], out["headline"], out["period"]["label"], out["compare"]
+    lines: list[str] = []
+    name = f"{ent['segment']} ({ent['dim_label'].lower()})"
+    cur, base, ch = ent["own_current"], ent["own_base"], ent["own_change"]
+    if cur is not None and base is not None and ch is not None:
+        vs = (f"{fmt_value(measure, base)} in {c['label']}" if c["key"] in ("prior_month", "same_month_last_year")
+              else f"the {c['label'].lower()} of {fmt_value(measure, base)}")
+        lines.append(f"{name}: {measure.label.lower()} was {fmt_value(measure, cur)} in {p}, "
+                     f"{'up' if ch >= 0 else 'down'} {fmt_delta(measure, ch)} versus {vs}.")
+    contrib = ent["contribution"] or 0.0
+    verb = "added" if contrib > 0 else "took off"
+    if h["flat"] or ent.get("share_pct") is None:
+        lines.append(f"Its part of the change in the whole scope: {verb} {fmt_delta(measure, contrib)}; "
+                     f"the whole scope is essentially flat, so a share of it is not shown.")
+    else:
+        lines.append(f"Its part of the change in the whole scope: {verb} {fmt_delta(measure, contrib)}, "
+                     f"{abs(ent['share_pct']):.0f}% of the scope's {fmt_delta(measure, h['delta'])} "
+                     f"{'increase' if h['delta'] > 0 else 'decrease'}.")
+    e = ent["evidence"]
+    if e.get("available"):
+        z = e["z"]
+        verdict = {"unusual": "unusual", "watch": "somewhat out of the ordinary", "normal": "within its normal range"}[e["flag"]]
+        lines.append(f"Against its own other {e['n']} months, this {e['basis']} is {verdict} "
+                     f"({abs(z):.1f} standard deviations {'above' if z > 0 else 'below'} normal).")
+    else:
+        lines.append(f"Not enough history to judge whether this is unusual ({e.get('reason', '')}).")
+    if out["ranking"]:
+        top = out["ranking"][0]
+        tail = (f" against {top['weight_in_slice_pct']:.0f}% of its base" if top.get("weight_in_slice_pct") is not None else "")
+        lines.append(f"Inside {ent['segment']}, the strongest concentration is {top['segment']} "
+                     f"({top['dim_label'].lower()}): {top['share_of_slice_pct']:.0f}% of its change{tail}.")
+    else:
+        lines.append(f"Inside {ent['segment']} no segment stands out beyond its own size: the change is spread out.")
     return lines

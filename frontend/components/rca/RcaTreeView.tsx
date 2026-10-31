@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { fmtDelta, fmtValue } from "@/lib/rca-format";
 import type { RcaFmt, RcaTree, TreeFlag, TreeNode } from "@/lib/rca-types";
-import { PatternTag, card, h2, sub } from "./RcaParts";
+import { PatternTag, h2, sub } from "./RcaParts";
+
+const card = "rounded-lg border border-slate-200 bg-white p-4 shadow-sm";
 
 const FLAG_STYLE: Record<TreeFlag, string> = {
   deviating: "bg-red-50 text-red-800 ring-red-200",
@@ -40,7 +42,7 @@ function Branch({
   return (
     <div className={depth ? "ml-5 border-l border-slate-200 pl-3" : ""}>
       <div onClick={() => onSelect(node.id)}
-           className={`my-1.5 flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 transition hover:bg-slate-50 ${
+           className={`my-1 flex cursor-pointer items-center gap-3 rounded-md border px-3 py-1.5 transition hover:bg-slate-50 ${
              selected === node.id ? "border-brand bg-red-50/40" : onPath.has(node.id) ? "border-slate-400 bg-white" : "border-slate-200 bg-white"}`}>
         <button type="button" aria-label={open ? "Collapse" : "Expand"}
                 onClick={(e) => { e.stopPropagation(); if (has) setOpen(!open); }}
@@ -85,13 +87,13 @@ export default function RcaTreeView({ data }: { data: RcaTree }) {
   const material = data.thresholds.material_share_pct;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className={card}>
         <h2 className={h2}>What the tree says</h2>
-        <ul className="mt-2 space-y-1.5 text-[15px] leading-relaxed text-slate-800">
+        <ul className="mt-1.5 space-y-1 text-[14px] leading-snug text-slate-800">
           {data.narrative.map((t, i) => <li key={i}>{t}</li>)}
         </ul>
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
           <span className="font-semibold uppercase tracking-wide text-slate-500">Main path</span>
           {data.chain.map((c, i) => (
             <span key={c.id} className="flex items-center gap-2">
@@ -102,14 +104,14 @@ export default function RcaTreeView({ data }: { data: RcaTree }) {
             </span>
           ))}
         </div>
-        <p className="mt-3 text-[11px] text-slate-500">
+        <p className="mt-2 text-[11px] text-slate-500">
           {data.reconciliation.ok ? "✔ The branches add up exactly to the change in the KPI." : `⚠ The branches differ from the total by ${data.reconciliation.max_gap}.`}
           {" "}A branch is judged only if it explains at least {material}% of the change; “Deviating” means its own move is unusual against its other months.
           “How the KPI is built” is a business definition; check it with the client.
         </p>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
         <div className={card}>
           <h2 className={h2}>How {data.metric.label.toLowerCase()} is built</h2>
           <p className={sub}>{root.how}. Each branch shows how much of the KPI’s change it accounts for. Click a branch for its breakdown.</p>

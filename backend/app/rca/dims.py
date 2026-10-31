@@ -23,6 +23,10 @@ class Dim:
 
 
 DIMS: dict[str, Dim] = {d.key: d for d in [
+    # Region and Zone are columns on every fact table (the network hierarchy). Cluster is left out on
+    # purpose: in this data every unit is its own cluster, so it would just repeat the unit.
+    Dim("region", "Region", "Region"),
+    Dim("zone", "Zone", "Zone"),
     Dim("unit", "Unit", "Unit_Name"),
     Dim("department", "Department", "Dept_Name"),
     Dim("item", "Item", "Item_Name"),

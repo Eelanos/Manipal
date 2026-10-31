@@ -188,3 +188,132 @@ def test_existing_dashboards_unchanged_by_rca():
     for slug in ["inventory-analysis", "consumption", "formulary-compliance", "sob-opportunities", "sob-compliance"]:
         r = client.get(f"/api/{slug}")
         assert r.status_code == 200 and r.json()["row_count"] > 0
+
+
+# ---------------------------------------------------------------------------
+# The command-center views: every unit / region / doctor ... as an entity
+# ---------------------------------------------------------------------------
+def test_all_twelve_units_are_in_the_data(store):
+    assert len(store.units) == 12
+    assert set(store.consumption.Unit_ID) == set(store.units.Unit_ID)
+    opts = client.get("/api/filter-options").json()
+    assert len(opts["units"]) == 12
+
+
+LENS_CASES = [(m, c) for m, meas in MEASURES.items() for c in meas.compares]
+
+
+@pytest.mark.parametrize("metric,compare", LENS_CASES)
+def test_every_lens_adds_up_to_the_change(store, metric, compare):
+    """For every view (region, unit, doctor ...) the entities' parts add up to the whole change."""
+    ran = 0
+    for month in ("2025-07", "2026-03", "2026-05"):
+        for dim in MEASURES[metric].dims_for(compare):
+            try:
+                L = engine.lens(store, Filters(), metric, month, compare, dim)
+            except RcaError:
+                continue
+            ran += 1
+            assert L["reconciliation"]["ok"], (metric, compare, month, dim, L["reconciliation"])
+            if L["entities"]:
+                total = sum(e["contribution"] for e in L["entities"])
+                eff = sum(x["contribution"] for x in L["effects"])
+                assert total + eff == pytest.approx(L["headline"]["delta"], abs=1e-6 * max(1, abs(L["headline"]["delta"])))
+    assert ran > 0
+
+
+def test_region_is_a_view_and_matches_the_unit_master(store):
+    L = engine.lens(store, Filters(), "formulary_compliance", "2026-05", "prior_month", "region")
+    assert {e["segment"] for e in L["entities"]} == set(store.units.Region)
+    U = engine.lens(store, Filters(), "formulary_compliance", "2026-05", "prior_month", "unit")
+    by_region = store.units.set_index("Unit_Name").Region
+    for reg in L["entities"]:
+        mine = sum(u["contribution"] for u in U["entities"] if by_region[u["segment"]] == reg["segment"])
+        assert reg["contribution"] == pytest.approx(mine, abs=1e-9)
+
+
+def test_budget_can_be_split_by_region_and_still_adds_up(store):
+    a = engine.analyze(store, Filters(), "consumption", "2026-05", "budget", [])
+    assert "region" in {d["key"] for d in a["dimensions"]} and a["reconciliation"]["ok"]
+    b = engine.analyze(store, Filters(), "consumption", "2026-05", "budget", ["region:South"], full=True)
+    assert b["reconciliation"]["ok"]
+
+
+def test_entity_numbers_recomputed_independently(store):
+    """KHO's own compliance and its part of the network change, rebuilt straight from the rows."""
+    c = store.consumption
+    may, apr = c[c.Month_Start == "2026-05-01"], c[c.Month_Start == "2026-04-01"]
+    off = lambda d: float(d.loc[~(d.Is_Formulary == True), "Value"].sum())    # noqa: E712
+    k_may, k_apr = may[may.Unit_Name == "KHO"], apr[apr.Unit_Name == "KHO"]
+    own = 100 - 100 * off(k_may) / k_may.Value.sum()
+    part = -100 * (off(k_may) / may.Value.sum() - off(k_apr) / apr.Value.sum())
+    e = engine.entity(store, Filters(), "formulary_compliance", "2026-05", "prior_month", "unit", "KHO")["entity"]
+    assert e["own_current"] == pytest.approx(own, abs=1e-9)
+    assert e["contribution"] == pytest.approx(part, abs=1e-9)
+    assert e["own_change"] == pytest.approx(own - (100 - 100 * off(k_apr) / k_apr.Value.sum()), abs=1e-9)
+
+
+@pytest.mark.parametrize("dim", ["unit", "region", "doctor", "department"])
+def test_ranking_only_names_real_drivers(store, dim):
+    from app.config import RCA_MATERIAL_SHARE_PCT, RCA_MIN_OVERINDEX_PP
+    L = engine.lens(store, Filters(), "formulary_compliance", "2026-05", "prior_month", dim)
+    for ent in L["entities"][:4]:
+        out = engine.entity(store, Filters(), "formulary_compliance", "2026-05", "prior_month", dim, ent["segment"])
+        for r in out["ranking"]:
+            assert r["share_of_slice_pct"] >= RCA_MATERIAL_SHARE_PCT
+            assert r["share_of_slice_pct"] - (r["weight_in_slice_pct"] or 0) >= RCA_MIN_OVERINDEX_PP
+            assert r["dim"] != dim            # never "explains" a unit by the unit itself
+        assert out["reconciliation"]["ok"]
+
+
+def test_a_card_cause_equals_the_first_ranked_driver(store):
+    c = engine.cause(store, Filters(), "formulary_compliance", "2026-05", "prior_month", "unit", "KHO")["top_cause"]
+    r = engine.entity(store, Filters(), "formulary_compliance", "2026-05", "prior_month", "unit", "KHO")["ranking"][0]
+    assert (c["dim"], c["segment"]) == (r["dim"], r["segment"])
+    assert c["share_of_slice_pct"] == pytest.approx(r["share_of_slice_pct"])
+
+
+def test_flags_follow_the_published_rule(store):
+    from app.config import RCA_MATERIAL_SHARE_PCT
+    L = engine.lens(store, Filters(), "formulary_compliance", "2026-05", "prior_month", "unit")
+    gross = L["summary"]["gross"]
+    for e in L["entities"]:
+        material = abs(e["contribution"]) / gross * 100 >= RCA_MATERIAL_SHARE_PCT
+        if not material:
+            assert e["flag"] == "minor"
+        elif e["evidence"].get("available"):
+            assert e["flag"] == {"unusual": "deviating", "watch": "watch", "normal": "normal"}[e["evidence"]["flag"]]
+
+
+def test_single_segment_scope_has_no_entities_instead_of_a_wrong_list(store):
+    L = engine.lens(store, Filters(unit="H010"), "formulary_compliance", "2026-05", "prior_month", "unit")
+    assert L["entities"] == [] and L["lens"]["segments"] == 1
+
+
+def test_tree_for_one_entity_is_that_entitys_own_tree(store):
+    t = tree.walk(store, Filters(), "formulary_compliance", "2026-05", "prior_month", ["unit:KHO"])
+    c = store.consumption
+    may, apr = c[(c.Month_Start == "2026-05-01") & (c.Unit_Name == "KHO")], c[(c.Month_Start == "2026-04-01") & (c.Unit_Name == "KHO")]
+    off = lambda d: float(d.loc[~(d.Is_Formulary == True), "Value"].sum())    # noqa: E712
+    assert t["tree"]["current"] == pytest.approx(100 - 100 * off(may) / may.Value.sum(), abs=1e-9)
+    assert t["tree"]["base"] == pytest.approx(100 - 100 * off(apr) / apr.Value.sum(), abs=1e-9)
+    assert t["reconciliation"]["ok"] and t["scope"]["path"][0]["value"] == "KHO"
+    # Same tree through the Filters route must agree (a unit filter is the same slice)
+    t2 = tree.walk(store, Filters(unit="H001"), "formulary_compliance", "2026-05", "prior_month")
+    assert t2["tree"]["current"] == pytest.approx(t["tree"]["current"], abs=1e-9)
+
+
+def test_new_endpoints_shapes_and_errors():
+    p = {"metric": "formulary_compliance", "month": "2026-05", "compare": "prior_month"}
+    L = client.get("/api/rca/lens", params={**p, "dim": "unit"})
+    assert L.status_code == 200 and len(L.json()["entities"]) == 12
+    assert client.get("/api/rca/lens", params={**p, "dim": "nope"}).status_code == 400
+    assert client.get("/api/rca/lens", params={**p, "compare": "target", "dim": "unit"}).status_code == 200
+    E = client.get("/api/rca/entity", params={**p, "dim": "unit", "segment": "PUN"})
+    assert E.status_code == 200 and E.json()["entity"]["segment"] == "PUN"
+    assert client.get("/api/rca/entity", params={**p, "dim": "unit", "segment": "Atlantis"}).status_code == 400
+    assert client.get("/api/rca/cause", params={**p, "dim": "unit", "segment": "PUN"}).status_code == 200
+    full = client.get("/api/rca/analysis", params={**p, "path": ["unit:PUN"], "full": True}).json()
+    assert all(len(b["rows"]) == b["segments"] for b in full["dimensions"])
+    tr = client.get("/api/rca/tree", params={**p, "path": ["unit:PUN"]})
+    assert tr.status_code == 200 and tr.json()["scope"]["path"][0]["value"] == "PUN"

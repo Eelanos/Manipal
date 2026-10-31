@@ -30,6 +30,7 @@ flag live in config.py, and the client should confirm them.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -40,15 +41,15 @@ from app.config import (RCA_CONCENTRATED_PCT, RCA_MATERIAL_SHARE_PCT, RCA_MODERA
 from app.filters import Filters
 from app.rca import evidence as ev
 from app.rca.dims import DIMS, has_dim
-from app.rca.engine import (fmt_delta, fmt_value, get_measure, is_flat, make_base, months_available,
-                            num, pattern_of, parse_month)
+from app.rca.engine import (_cached, _fkey, fmt_delta, fmt_value, get_measure, is_flat, make_base,
+                            months_available, num, parse_month, parse_path, pattern_of)
 from app.rca.measures import (MEASURES, RcaError, Scope, align, at, long, stock_class, total)
 
 TREE_COMPARES = ("prior_month", "same_month_last_year")
 TREE_METRICS = ("formulary_compliance", "inventory_days")
 
-_CONS_SPLITS = ("department", "doctor", "item", "unit", "payer", "store")
-_INV_SPLITS = ("department", "item", "unit", "store", "category", "stock_group")
+_CONS_SPLITS = ("region", "department", "doctor", "item", "unit", "payer", "store")
+_INV_SPLITS = ("region", "department", "item", "unit", "store", "category", "stock_group")
 
 
 @dataclass
@@ -222,7 +223,18 @@ def _lc(label: str) -> str:
     return label[:1].lower() + label[1:]
 
 
-def walk(store, f: Filters, metric_key: str, month: str, compare_key: str) -> dict:
+def walk(store, f: Filters, metric_key: str, month: str, compare_key: str,
+         path: list[str] | None = None) -> dict:
+    """
+    With a `path` (e.g. ["unit:PUN"]) the tree describes THAT segment on its own: its own KPI and the
+    branches it is built from, with its own totals as the denominators. (The driver analysis does the
+    opposite - it measures the segment's part of the whole scope's change; both are exact.)
+    """
+    key = ("tree", metric_key, month, compare_key, tuple(path or []), _fkey(f))
+    return _cached(store, key, lambda: _walk(store, f, metric_key, month, compare_key, path))
+
+
+def _walk(store, f: Filters, metric_key: str, month: str, compare_key: str, path: list[str] | None) -> dict:
     if metric_key not in TREE_METRICS:
         raise RcaError(f"No KPI tree is defined for '{metric_key}'. Available: "
                        + ", ".join(MEASURES[k].label for k in TREE_METRICS) + ".")
@@ -233,7 +245,12 @@ def walk(store, f: Filters, metric_key: str, month: str, compare_key: str) -> di
     m = parse_month(month, months)
     base = make_base(measure, compare_key, m, months)
     bm = base.month
+    conds = parse_path(path or [], measure, compare_key)
     sc = Scope(store, f, [])
+    if conds:                                   # make the drilled segment the whole world of this tree
+        sc = copy.copy(Scope(store, f, conds))
+        sc.cons_full, sc.inv_full, sc.bud_full = sc.cons_sl, sc.inv_sl, sc.bud_sl
+        sc._set_conds([])
     cur = measure.root_value(sc, m)
     base_val = measure.root_value(sc, bm)
     if cur is None or base_val is None:
@@ -282,7 +299,8 @@ def walk(store, f: Filters, metric_key: str, month: str, compare_key: str) -> di
                    "higher_is": measure.higher_is, "definition": measure.definition},
         "period": {"month": m.strftime("%Y-%m"), "label": m.strftime("%b %Y")},
         "compare": {"key": base.key, "label": base.label},
-        "scope": {"filters": f.as_dict()},
+        "scope": {"filters": f.as_dict(),
+                  "path": [{"dim": d, "dim_label": DIMS[d].label, "value": v} for d, v in conds]},
         "tree": root, "chain": chain, "flat": flat,
         "reconciliation": {"ok": bool(ok), "max_gap": num(max(checks)),
                            "checked": "Branches add up to the change in the KPI"},
@@ -295,20 +313,25 @@ def walk(store, f: Filters, metric_key: str, month: str, compare_key: str) -> di
 def _narrate(measure, a: dict) -> list[str]:
     t, p, c = a["tree"], a["period"]["label"], a["compare"]["label"]
     delta = t["change"]
+    who = ", ".join(f"{x['value']} ({x['dim_label'].lower()})" for x in a["scope"]["path"])
+    lead = f"{who} on its own: " if who else ""
     if t["share_pct"] is None:
-        return [f"{measure.label} was essentially flat versus {c} ({fmt_value(measure, t['base'])} to "
-                f"{fmt_value(measure, t['current'])}), so shares of the change are not shown. Branch impacts below "
-                f"may still be large and offset each other."]
-    lines = [f"{measure.label} {'rose' if delta > 0 else 'fell'} {fmt_delta(measure, delta)} in {p} "
-             f"({fmt_value(measure, t['base'])} in {c} to {fmt_value(measure, t['current'])})."]
-    parts = []
-    for b in sorted(t["children"], key=lambda x: -abs(x["impact"] or 0)):
-        if b["impact"] is None or abs(b["impact"]) < RCA_NEGLIGIBLE_DELTA:
-            continue
-        parts.append(f"{_lc(b['label'])} {'added' if b['impact'] > 0 else 'took off'} "
-                     f"{fmt_delta(measure, b['impact'])}")
-    if parts:
-        lines.append("The branches: " + "; ".join(parts) + ".")
+        lines = [f"{lead}{measure.label.lower() if who else measure.label} was essentially flat versus {c} "
+                 f"({fmt_value(measure, t['base'])} to {fmt_value(measure, t['current'])}), so shares of the change "
+                 f"are not shown. Branch impacts below may still be large and offset each other."]
+        return lines
+    else:
+        lines = [f"{lead}{measure.label.lower() if who else measure.label} {'rose' if delta > 0 else 'fell'} "
+                 f"{fmt_delta(measure, delta)} in {p} ({fmt_value(measure, t['base'])} in {c} to "
+                 f"{fmt_value(measure, t['current'])})."]
+        parts = []
+        for b in sorted(t["children"], key=lambda x: -abs(x["impact"] or 0)):
+            if b["impact"] is None or abs(b["impact"]) < RCA_NEGLIGIBLE_DELTA:
+                continue
+            parts.append(f"{_lc(b['label'])} {'added' if b['impact'] > 0 else 'took off'} "
+                         f"{fmt_delta(measure, b['impact'])}")
+        if parts:
+            lines.append("The branches: " + "; ".join(parts) + ".")
     dev = []
 
     def collect(n):

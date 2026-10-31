@@ -45,6 +45,11 @@ from app.rca.dims import DIMS, has_dim, seg_series
 
 TOTAL = "__total__"
 
+# The budget table is set per unit and department, and carries the unit's region and zone, so a
+# budget comparison can be split by exactly these.
+BUDGET_DIMS = ("unit", "department", "region", "zone")
+BUDGET_DIMS_TEXT = "unit, department, region and zone"
+
 
 class RcaError(ValueError):
     """A problem the user can act on (bad month, comparison unavailable...)."""
@@ -85,8 +90,8 @@ class Scope:
         self.bud_reason: str | None = None
         if self.stg_filtered:
             self.bud_reason = "Budget is set per unit and department, not per stock take group."
-        elif any(d not in ("unit", "department") for d, _ in conds):
-            self.bud_reason = "Budget is only available by unit and department."
+        elif any(d not in BUDGET_DIMS for d, _ in conds):
+            self.bud_reason = f"Budget is only available by {BUDGET_DIMS_TEXT}."
         self.bud_sl = _cut(self.bud_full, conds)
 
     def with_conds(self, conds: list[tuple[str, str]]) -> "Scope":
@@ -111,8 +116,10 @@ def long(df: pd.DataFrame, dim: str | None, spec: dict) -> pd.DataFrame:
     cols = ["m", "seg", *spec]
     if df is None or not len(df):
         return pd.DataFrame({c: pd.Series(dtype=float if c not in ("m", "seg") else object) for c in cols})
+    ms = df["Month_Start"]
     out = pd.DataFrame({
-        "m": pd.to_datetime(df["Month_Start"]).to_numpy(),
+        # Month_Start is already a datetime column; re-parsing it on every call was the slowest part.
+        "m": (ms if pd.api.types.is_datetime64_any_dtype(ms) else pd.to_datetime(ms)).to_numpy(),
         "seg": seg_series(df, dim).to_numpy() if dim else TOTAL,
     })
     for name, (col, mask) in spec.items():
@@ -192,9 +199,21 @@ class Measure:
     def has_data(self, sc: Scope, m) -> bool:
         return self.root_value(sc, m) is not None
 
+    def frames_for(self, sc: Scope) -> list[pd.DataFrame]:
+        """The (full-scope) tables this measure is calculated from."""
+        return [sc.cons_full]
+
+    def seg_count(self, sc: Scope, dim: str) -> int:
+        """How many distinct values of `dim` exist in this measure's data in the user's scope."""
+        labels: set[str] = set()
+        for df in self.frames_for(sc):
+            if has_dim(df, dim) and len(df):
+                labels |= set(seg_series(df, dim).unique())
+        return len(labels)
+
     def dims_for(self, base_key: str) -> list[str]:
         if base_key == "budget":
-            return [d for d in self.dims if d in ("unit", "department")]
+            return [d for d in self.dims if d in BUDGET_DIMS]
         return list(self.dims)
 
 
@@ -206,7 +225,7 @@ class ConsumptionValue(Measure):
     kind = "sum"
     higher_is = "neutral"
     definition = "Total value of items consumed in the month (Consumption dashboard)."
-    dims = ("unit", "department", "item", "doctor", "payer", "patient_type", "episode",
+    dims = ("region", "zone", "unit", "department", "item", "doctor", "payer", "patient_type", "episode",
             "package", "store", "category", "tier", "stock_group", "implant", "essential")
     compares = ("prior_month", "same_month_last_year", "budget")
     weight_label = "Share of consumption"
@@ -231,7 +250,7 @@ class ConsumptionValue(Measure):
         return lg.pivot(index="m", columns="seg", values="X").sort_index()
 
     def seg_budget_series(self, sc, dim):
-        if sc.bud_reason or dim not in ("unit", "department"):
+        if sc.bud_reason or dim not in BUDGET_DIMS:
             return None
         lg = long(sc.bud_sl, dim, self._bud)
         return lg.pivot(index="m", columns="seg", values="X").sort_index()
@@ -272,6 +291,8 @@ class ShareMeasure(Measure):
         self.dims, self.compares, self.target = dims, compares, target
         self.weight_label = weight_label
         self._spec = {"D": (den_col, None), "N": (den_col, num_mask)}
+
+    def frames_for(self, sc): return [self._full(sc)]
 
     def _full(self, sc): return sc.cons_full if self.table == "cons" else sc.inv_full
     def _sl(self, sc): return sc.cons_sl if self.table == "cons" else sc.inv_sl
@@ -340,12 +361,16 @@ class InventoryDays(Measure):
     higher_is = "neutral"
     definition = ("Stock value x days in the month / consumption in the month, using the month-end stock "
                   "(the formula on the Inventory Analysis dashboard).")
-    dims = ("unit", "department", "item", "stock_group", "store", "category", "tier", "implant", "essential")
+    dims = ("region", "zone", "unit", "department", "item", "stock_group", "store", "category", "tier",
+            "implant", "essential")
     compares = ("prior_month", "same_month_last_year", "budget")
     weight_label = "Share of stock"
     _inv = {"S": ("Stock_Value", None)}
     _cons = {"C": ("Value", None)}
     _bud = {"B": ("Budget_Value", None)}
+
+    def frames_for(self, sc):
+        return [sc.inv_full, sc.cons_full]
 
     @staticmethod
     def _days(S, C, D):
@@ -390,7 +415,7 @@ class InventoryDays(Measure):
         return out.sort_index()
 
     def seg_budget_series(self, sc, dim):
-        if sc.bud_reason or dim not in ("unit", "department"):
+        if sc.bud_reason or dim not in BUDGET_DIMS:
             return None
         s = long(sc.inv_sl, dim, self._inv).pivot(index="m", columns="seg", values="S")
         b = long(sc.bud_sl, dim, self._bud).pivot(index="m", columns="seg", values="B")
@@ -456,7 +481,8 @@ class InventoryDays(Measure):
 
 
 # ---- registry -------------------------------------------------------------
-_INV_DIMS = ("unit", "department", "item", "stock_group", "store", "category", "tier", "implant", "essential")
+_INV_DIMS = ("region", "zone", "unit", "department", "item", "stock_group", "store", "category", "tier",
+             "implant", "essential")
 _CONS_DIMS = ConsumptionValue.dims
 
 MEASURES: dict[str, Measure] = {m.key: m for m in [
