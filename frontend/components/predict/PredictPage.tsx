@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useFilters } from "@/lib/filter-context";
 import { fetchPredictOptions, fetchPredictOverview } from "@/lib/predict-api";
-import type { PredictOptions, PredictOverview } from "@/lib/predict-types";
+import type { PlanSettings, PredictOptions, PredictOverview } from "@/lib/predict-types";
 import CoverChart from "./CoverChart";
 import ForecastChart from "./ForecastChart";
 import HealthDonut from "./HealthDonut";
 import ItemModal from "./ItemModal";
 import NumbersHelp from "./NumbersHelp";
+import PlanControls from "./PlanControls";
 import PlanTable from "./PlanTable";
 import PredictKpi from "./PredictKpi";
 import StatusModal from "./StatusModal";
@@ -25,6 +26,8 @@ export default function PredictPage() {
   const [options, setOptions] = useState<PredictOptions | null>(null);
   const [optErr, setOptErr] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("reorder");
+  // Delivery time / safety buffer / order cover the user changed on this page (empty = the backend defaults).
+  const [custom, setCustom] = useState<Partial<PlanSettings>>({});
   const [statusPick, setStatusPick] = useState<string | null>(null);
   const [itemPick, setItemPick] = useState<{ item_id: string; unit_id: string } | null>(null);
   // The latest answer tagged with the request it belongs to; loading is derived from that.
@@ -34,15 +37,21 @@ export default function PredictPage() {
     fetchPredictOptions().then(setOptions).catch((e) => setOptErr(String(e.message ?? e)));
   }, []);
 
-  const reqKey = useMemo(() => JSON.stringify(filters), [filters]);
+  const defaults = useMemo<PlanSettings>(() => {
+    const d = (k: string) => Number(options?.settings.find((s) => s.key === k)?.default);
+    return { lead_days: d("lead_days"), buffer_days: d("buffer_days"), plan_days: d("plan_days") };
+  }, [options]);
+  const plan = useMemo<PlanSettings>(() => ({ ...defaults, ...custom }), [defaults, custom]);
+
+  const reqKey = useMemo(() => JSON.stringify([filters, plan]), [filters, plan]);
   useEffect(() => {
     if (!options) return;
     const ac = new AbortController();
-    fetchPredictOverview(filters, ac.signal)
+    fetchPredictOverview(filters, plan, ac.signal)
       .then((d) => setRes({ key: reqKey, data: d, error: null }))
       .catch((e) => { if (e.name !== "AbortError") setRes({ key: reqKey, data: null, error: String(e.message ?? e) }); });
     return () => ac.abort();
-  }, [options, filters, reqKey]);
+  }, [options, filters, plan, reqKey]);
   const data = res?.data ?? null;
   const error = res?.error ?? null;
   const loading = !res || res.key !== reqKey;
@@ -60,12 +69,8 @@ export default function PredictPage() {
       <header>
         <h1 className="text-2xl font-semibold text-slate-900">Predictive Analysis</h1>
         <p className="mt-0.5 text-sm font-medium text-slate-600">Demand &amp; Replenishment Planner</p>
-        {s && (
-          <p className="mt-1 text-xs text-slate-500">
-            Assumes: {String(s.window_months)}-month usage · {String(s.lead_days)}d delivery · {String(s.buffer_days)}d buffer ·{" "}
-            {String(s.plan_days)}d order cover
-          </p>
-        )}
+        <PlanControls specs={options.settings} plan={plan} defaults={defaults} usageMonths={s ? Number(s.window_months) : null}
+                      onChange={(k, v) => setCustom((c) => ({ ...c, [k]: v }))} onReset={() => setCustom({})} />
       </header>
 
       {error && <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{error}</div>}
@@ -140,8 +145,8 @@ export default function PredictPage() {
         </div>
       )}
 
-      {statusPick && <StatusModal status={statusPick} filters={filters} options={options} onPick={setItemPick} onClose={() => setStatusPick(null)} />}
-      {itemPick && <ItemModal target={itemPick} filters={filters} options={options} onClose={() => setItemPick(null)} />}
+      {statusPick && <StatusModal status={statusPick} filters={filters} plan={plan} options={options} onPick={setItemPick} onClose={() => setStatusPick(null)} />}
+      {itemPick && <ItemModal target={itemPick} filters={filters} plan={plan} options={options} onClose={() => setItemPick(null)} />}
     </div>
   );
 }

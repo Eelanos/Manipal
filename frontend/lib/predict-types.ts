@@ -5,9 +5,29 @@ import type { Kpi } from "./types";
 
 export type Settings = Record<string, number | boolean>;
 
+// One adjustable setting as advertised by GET /api/predict/options (default and limits live in the backend).
+export interface SettingSpec {
+  key: string;
+  label: string;
+  default: number | boolean;
+  min: number | null;
+  max: number | null;
+  step: number | null;
+  unit: string;
+  help: string;
+}
+
+// The three planning assumptions the user can change on the page.
+export interface PlanSettings {
+  lead_days: number;
+  buffer_days: number;
+  plan_days: number;
+}
+
 export interface PredictOptions {
   as_of: string;
   horizon_days: number;
+  settings: SettingSpec[];
 }
 
 export interface ForecastPoint {

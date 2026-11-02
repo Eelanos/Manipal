@@ -86,19 +86,19 @@ function ForecastTable({ f }: { f: Forecast }) {
     <table className="mt-3 w-full border-t border-slate-100 text-sm">
       <thead>
         <tr className="text-[11px] uppercase tracking-wide text-slate-500">
-          <th className="py-2 text-left font-semibold">Month</th>
-          <th className="py-2 text-right font-semibold">Forecast</th>
-          <th className="py-2 text-right font-semibold" title="Actual spend in the same month a year earlier">Same month, last year</th>
-          <th className="py-2 text-right font-semibold">Change</th>
+          <th className="py-2 text-center font-semibold">Month</th>
+          <th className="py-2 text-center font-semibold">Forecast</th>
+          <th className="py-2 text-center font-semibold" title="Actual spend in the same month a year earlier">Same month, last year</th>
+          <th className="py-2 text-center font-semibold">Change</th>
         </tr>
       </thead>
       <tbody className="text-slate-700">
         {rows.map(({ p, ly, chg }) => (
           <tr key={p.month} className="border-t border-slate-100">
-            <td className="py-1.5 text-slate-900">{p.label}</td>
-            <td className="py-1.5 text-right font-semibold tabular-nums text-slate-900">{crore(p.forecast as number)}</td>
-            <td className="py-1.5 text-right tabular-nums">{ly !== null ? crore(ly) : "—"}</td>
-            <td className="py-1.5 text-right tabular-nums">{chg !== null ? `${chg >= 0 ? "▲" : "▼"} ${Math.abs(chg).toFixed(1)}%` : "—"}</td>
+            <td className="py-1.5 text-center text-slate-900">{p.label}</td>
+            <td className="py-1.5 text-center font-semibold tabular-nums text-slate-900">{crore(p.forecast as number)}</td>
+            <td className="py-1.5 text-center tabular-nums">{ly !== null ? crore(ly) : "—"}</td>
+            <td className="py-1.5 text-center tabular-nums">{chg !== null ? `${chg >= 0 ? "▲" : "▼"} ${Math.abs(chg).toFixed(1)}%` : "—"}</td>
           </tr>
         ))}
       </tbody>
