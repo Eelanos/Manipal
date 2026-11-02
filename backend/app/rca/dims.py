@@ -57,3 +57,11 @@ def seg_series(df: pd.DataFrame, key: str) -> pd.Series:
 
 def has_dim(df: pd.DataFrame, key: str) -> bool:
     return DIMS[key].col in df.columns
+
+
+def dim_in_data(key: str) -> bool:
+    """True if the loaded data records this dimension at all. A dimension whose column is missing from
+    the data (for example Store when the data set has no Store_Location) is not offered, instead of failing."""
+    from app.data_loader import get_store   # imported here: data_loader must not depend on the RCA package
+    s = get_store()
+    return any(DIMS[key].col in f.columns for f in (s.consumption, s.inventory))

@@ -16,7 +16,7 @@ from app.config import (RCA_HOME_CARDS, RCA_MATERIAL_SHARE_PCT, RCA_MIN_HISTORY_
 from app.data_loader import DataStore, get_store
 from app.filters import Filters, get_filters
 from app.rca import engine, tree
-from app.rca.dims import DIMS
+from app.rca.dims import DIMS, dim_in_data
 from app.rca.measures import COMPARE_LABELS, MEASURES, RcaError
 
 router = APIRouter(prefix="/api/rca", tags=["rca"])
@@ -40,7 +40,7 @@ def rca_options(store: DataStore = Depends(get_store)) -> dict:
             "higher_is": m.higher_is, "definition": m.definition,
             "compares": [{"key": c, "label": (f"Target ({m.target:.0f}%)" if c == "target" else COMPARE_LABELS[c])}
                          for c in m.compares],
-            "dims": [{"key": d, "label": DIMS[d].label} for d in m.dims],
+            "dims": [{"key": d, "label": DIMS[d].label} for d in m.dims if dim_in_data(d)],
             "has_tree": m.key in tree.TREE_METRICS,
             "tree_compares": [c for c in m.compares if c in tree.TREE_COMPARES] if m.key in tree.TREE_METRICS else [],
         })

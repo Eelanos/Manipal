@@ -60,7 +60,7 @@ export default function ItemModal({ target, filters, options, onClose }: {
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Fact label="Usable stock" value={num(f.on_hand)} hint="Stock on the shelf at the snapshot date that has not expired" />
-            <Fact label="On order" value={num(f.on_order)} hint="Already ordered, not yet received (purchase orders with status In-Transit)" />
+            <Fact label="On order" value={num(f.on_order)} hint="Already ordered and on its way, not yet received (stock in transit)" />
             <Fact label="Daily usage" value={dec1(f.daily_usage)} hint="Average units used per day over the usage window" />
             {f.expired_qty > 0 && <Fact label="Expired (not usable)" value={num(f.expired_qty)} />}
             <Fact label="Days of cover" value={coverText(f.cover_days, f.cover_capped, options)} hint="Days until the usable stock on hand is used up (open orders not counted)" />

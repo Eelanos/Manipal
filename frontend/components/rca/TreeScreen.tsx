@@ -17,18 +17,21 @@ export default function TreeScreen({
   const allowed = metric.compares.filter((c) => metric.tree_compares.includes(c.key));
   // A tree compares two months; if the page is set to budget/target, use the first month comparison instead.
   const [compare, setCompare] = useState(allowed.some((c) => c.key === params.compare) ? params.compare : allowed[0]?.key ?? "prior_month");
-  const [tree, setTree] = useState<RcaTree | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  // The result is stored together with the request it answers, so a result for an older request is never shown
+  // (state is only set when a response arrives, never at the start of the effect).
+  const reqKey = [params.metric, params.month, compare, JSON.stringify(filters), path.join("|")].join("#");
+  const [res, setRes] = useState<{ key: string; tree: RcaTree | null; err: string | null } | null>(null);
+  const tree = res?.key === reqKey ? res.tree : null;
+  const err = res?.key === reqKey ? res.err : null;
 
   useEffect(() => {
     const ac = new AbortController();
-    setTree(null); setErr(null);
     fetchRcaTree({ ...params, compare }, filters, ac.signal, path)
-      .then(setTree)
-      .catch((e) => { if (e.name !== "AbortError") setErr(String(e.message ?? e)); });
+      .then((t) => setRes({ key: reqKey, tree: t, err: null }))
+      .catch((e) => { if (e.name !== "AbortError") setRes({ key: reqKey, tree: null, err: String(e.message ?? e) }); });
     return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.metric, params.month, compare, filters, path.join("|")]);
+  }, [reqKey]);
 
   const who = path.map((p) => p.split(":")[1]).join(" › ");
   return (

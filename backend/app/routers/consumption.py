@@ -91,18 +91,22 @@ def consumption_dashboard(
     # FAKE DIMENSION: Store_Location doesn't exist in real hospital data we
     # have; it's generated (add_store_location.py) to mirror the client's
     # location-level breakdown. Clearly labelled, not read off any document.
-    loc = metrics.breakdown(df, "Store_Location", top_n=10)
-    charts.append(Chart(
-        id="top_locations_consumption",
-        title="Top 10 Location-wise Consumption", type="hbar", x_key="label",
-        series=[ChartSeries(name="Value", data=[
-            {"label": r["Store_Location"], "value": float(r["Value"])}
-            for _, r in loc.iterrows()])],
-            drilldown=metrics.consumption_by_item_for_location(df),
-    ))
+    # The chart is only drawn when the loaded data actually has that column (a data set without
+    # it simply has no location charts, instead of the whole page failing).
+    has_loc = "Store_Location" in df.columns
+    if has_loc:
+        loc = metrics.breakdown(df, "Store_Location", top_n=10)
+        charts.append(Chart(
+            id="top_locations_consumption",
+            title="Top 10 Location-wise Consumption", type="hbar", x_key="label",
+            series=[ChartSeries(name="Value", data=[
+                {"label": r["Store_Location"], "value": float(r["Value"])}
+                for _, r in loc.iterrows()])],
+                drilldown=metrics.consumption_by_item_for_location(df),
+        ))
 
     # 3. Top 10 by store location - inventory value (latest snapshot).
-    if len(inv):
+    if len(inv) and "Store_Location" in inv.columns:
         as_on = inv["Date"].max()
         snap = inv[inv["Date"] == as_on]
         loc_inv = metrics.breakdown(snap, "Store_Location", value_col="Stock_Value", top_n=10)
@@ -147,14 +151,15 @@ def consumption_dashboard(
         insights.append(
             "Budget is planned by department, not by stock take group - "
             "clear the group filter to compare against plan.")
-    if len(loc):
+    if has_loc and len(loc):
         insights.append(
             f"{loc.iloc[0]['Store_Location']} is the top consumption "
             f"location at {inr_compact(loc.iloc[0]['Value'])}.")
-    insights.append(
-        "Location-wise breakdowns use a synthetic Store Location - the real "
-        "data has no in-hospital location dimension. Structure matches the "
-        "client's report; the specific locations are illustrative.")
+    if has_loc:
+        insights.append(
+            "Location-wise breakdowns use a synthetic Store Location - the real "
+            "data has no in-hospital location dimension. Structure matches the "
+            "client's report; the specific locations are illustrative.")
 
     return DashboardResponse(
         filters=f.as_dict(), kpis=kpis, charts=charts, table=table,

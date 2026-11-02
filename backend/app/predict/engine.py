@@ -15,7 +15,7 @@ THE FORMULAS (all "per item per unit" unless stated)
   days of cover     days until cumulative demand reaches the stock on hand
   reorder point     demand over (delivery time + safety buffer)
   order-up-to       demand over (delivery time + safety buffer + plan days)
-  position          on hand + on order (open purchase orders)
+  position          on hand + on order (stock already on its way)
   order quantity    order-up-to - position   (only when position < reorder point)
   excess            on hand - demand over (max days of cover)
   expiry at risk    FIFO: batches are used earliest-expiry first; whatever the
@@ -188,6 +188,19 @@ class Plan:
 _LINE_COLS = ["Unit_ID", "Item_ID"]
 
 
+def on_order_source(store: DataStore) -> str:
+    """The source actually used for "on order". The stock table must carry the in-transit column; if a data set
+    does not, the plan falls back to purchase orders rather than failing."""
+    has = "In_Transit_Qty" in store.inventory.columns
+    return "inventory" if (P.ON_ORDER_SOURCE == "inventory" and has) else "purchase"
+
+
+def _on_order_note(store: DataStore) -> str:
+    if on_order_source(store) == "inventory":
+        return "“On order” = stock in transit on the snapshot date (the same “in transit” quantity the Inventory Analysis page uses)."
+    return f"“On order” = purchase orders with status {P.OPEN_PO_STATUS} placed in the last {P.OPEN_PO_MAX_AGE_DAYS} days."
+
+
 def _scope_frames(store: DataStore, f: Filters):
     """
     The filtered source tables. `f_plan` ignores Department (stock isn't held by
@@ -286,10 +299,16 @@ def _compute_plan(store: DataStore, f: Filters, p: Params) -> Plan:
                              _xq=inv_all["Stock_Qty"].where(~live, 0.0))
     stock = inv_all.groupby(_LINE_COLS).agg(on_hand=("_q", "sum"), stock_value=("_v", "sum"), expired_qty=("_xq", "sum"))
 
-    # --- open purchase orders ----------------------------------------------------
-    po = apply(store.purchase, f_plan, "PO_Date")
-    po = po[(po["Status"] == P.OPEN_PO_STATUS) & (po["PO_Date"] <= snapshot)]
-    on_order = po.groupby(_LINE_COLS)["Qty"].sum().rename("on_order")
+    # --- on order: stock already on its way ---------------------------------------
+    if on_order_source(store) == "inventory":
+        # In-transit quantity recorded with the stock snapshot (not tied to a batch, so expired batches do not matter).
+        on_order = inv_all.groupby(_LINE_COLS)["In_Transit_Qty"].sum().rename("on_order")
+    else:
+        po = apply(store.purchase, f_plan, "PO_Date")
+        open_po = po[(po["Status"] == P.OPEN_PO_STATUS) & (po["PO_Date"] <= snapshot)]
+        # An order that has been "In-Transit" for months is a stale record, not stock that is about to arrive.
+        po = open_po[open_po["PO_Date"] >= snapshot - pd.Timedelta(days=P.OPEN_PO_MAX_AGE_DAYS)]
+        on_order = po.groupby(_LINE_COLS)["Qty"].sum().rename("on_order")
 
     lines = pd.concat([usage, stock, on_order], axis=1).reset_index()
     # A line with usage but NO inventory row on the snapshot date is a data gap, not a proven
@@ -561,6 +580,14 @@ def _rows(df: pd.DataFrame, limit: int) -> tuple[list[dict], bool]:
     return [_line_row(r) for r in df.head(limit).itertuples(index=False)], len(df) > limit
 
 
+def _inventory_value(store: DataStore, f: Filters, snapshot: pd.Timestamp) -> float:
+    """Total stock value on the snapshot date for the Unit / Group filters (expired stock included,
+    the same figure the Inventory Analysis page shows)."""
+    _, f_plan = _scope_frames(store, f)
+    inv = apply(store.inventory, replace(f_plan, date_from=snapshot.date(), date_to=snapshot.date()), "Date")
+    return float(inv["Stock_Value"].sum())
+
+
 def build_overview(store: DataStore, f: Filters, p: Params) -> dict:
     plan = compute_plan(store, f, p)
     fc = build_forecast(store, f, p, plan)
@@ -574,20 +601,26 @@ def build_overview(store: DataStore, f: Filters, p: Params) -> dict:
     exp_expired = float(plan.batches.loc[plan.batches["state"] == "expired", "risk_value"].sum()) if not plan.batches.empty else 0.0
     exp_soon = float(plan.batches.loc[plan.batches["state"] == "expiring", "risk_value"].sum()) if not plan.batches.empty else 0.0
     exc_val = float(exc_df["excess_value"].sum())
+    inv_val = _inventory_value(store, f, plan.snapshot)
 
     kpis = [
         Kpi(label="Items to order now", value=float(len(order_df)), display=f"{len(order_df):,}", tone="risk" if len(order_df) else "positive",
             note=f"Worth {inr_compact(float(order_df['order_value'].sum()))} to order"),
         Kpi(label="Stock-out risk", value=float(len(crit_df)), display=f"{len(crit_df):,}", tone="risk" if len(crit_df) else "positive",
             note=f"Out of stock within {p.lead_days} days"),
-        Kpi(label="Excess stock value", value=exc_val, display=inr_compact(exc_val), tone="risk" if exc_val > 0 else "positive",
-            note=f"Above {p.max_cover_days} days of usage"),
+        # Headline = everything on the shelf at the snapshot; the excess part is quoted underneath.
+        Kpi(label=f"Inventory, {plan.snapshot:%d %b %Y}", value=inv_val, display=inr_compact(inv_val),
+            tone="risk" if exc_val > 0 else "positive",
+            note="Excess stock value " + inr_compact(exc_val).replace(" ", "\u00a0")),  # keep "₹0.52 Cr" together when the line wraps
         Kpi(label="Expiry at risk", value=exp_expired + exp_soon, display=inr_compact(exp_expired + exp_soon), tone="risk" if exp_expired + exp_soon > 0 else "positive",
             note=f"{inr_compact(exp_expired)} expired, {inr_compact(exp_soon)} expiring"),
         Kpi(label=f"Demand, next {p.plan_days} days", value=expected, display=inr_compact(expected),
             delta_pct=_r(delta, 1), tone="neutral",
             note="vs last year" + (" · department filter applied" if f.department != ALL else "")),
     ]
+
+    # Display order on the page: money first, then demand, then the action counts.
+    kpis = [kpis[2], kpis[3], kpis[4], kpis[0], kpis[1]]
 
     # --- charts / tables ---------------------------------------------------------
     # Lowest on-hand cover first; among equals, the line least covered once open orders are counted.
@@ -613,7 +646,7 @@ def build_overview(store: DataStore, f: Filters, p: Params) -> dict:
         f"Stock snapshot: {plan.snapshot:%d %b %Y}. Usage window: {plan.win_start:%d %b %Y} – {plan.win_end:%d %b %Y} ({plan.window_days} days).",
         plan.season_note,
         f"Delivery time ({p.lead_days}d) and safety buffer ({p.buffer_days}d) are assumptions (the data holds no vendor lead times); they are set in the backend configuration.",
-        f"“On order” = purchase orders with status {P.OPEN_PO_STATUS}.",
+        _on_order_note(store),
         "The Period filter is not used: the plan is based on the latest stock snapshot. Expiry at risk can overlap with Excess stock.",
     ]
     n_gap = int((L["status"] == P.STATUS_NO_RECORD).sum())

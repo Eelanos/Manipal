@@ -18,14 +18,14 @@ PARQUET_DIR = DATA_DIR / "parquet"
 FLAGS_PATH = DATA_DIR / "synthetic_flags.json"
 
 # --- The single most important constant in this app -----------------------
-# The dataset runs to 31 Dec 2026. NEVER use datetime.now() to resolve date
+# The dataset runs to 31 Mar 2026 (FY2025 + FY2026). NEVER use datetime.now() to resolve date
 # presets ("This Month", "YTD") - today's real date is earlier than the end of
 # the data, so relative presets computed from now() would show future-dated
 # transactions during a live demo. Everything relative is computed from here.
-AS_OF_DATE = date(2026, 12, 31)
+AS_OF_DATE = date(2026, 3, 31)
 
-DATA_START = date(2025, 1, 1)
-DATA_END = date(2026, 12, 31)
+DATA_START = date(2024, 4, 1)
+DATA_END = date(2026, 3, 31)
 
 # --- Business thresholds (all demo heuristics, clearly labelled) ----------
 FORMULARY_TARGET_PCT = 92.0    # reference line on the compliance trend chart

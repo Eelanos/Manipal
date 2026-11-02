@@ -51,7 +51,7 @@ SETTINGS: dict[str, Setting] = {s.key: s for s in [
     Setting("window_months", "Usage based on last", _env("window_months", 6, int), None, None, None,
             "months", "How many recent months are averaged to get the daily usage of each item.",
             choices=(3, 6, 12)),
-    Setting("lead_days", "Delivery time", _env("lead_days", 7, int), 1, 90, 1,
+    Setting("lead_days", "Delivery time", _env("lead_days", 2, int), 1, 90, 1,
             "days", "Assumed days between placing an order and receiving it. Not in the data - change it to see what-if."),
     Setting("buffer_days", "Safety buffer", _env("buffer_days", 5, int), 0, 60, 1,
             "days", "Extra days of usage kept as a cushion against late deliveries or a busy spell."),
@@ -110,13 +110,19 @@ HISTORY_MONTHS = 12          # months of actuals drawn on the demand chart
 FORECAST_MONTHS = 3          # months of forecast drawn after the actuals
 HORIZON_DAYS = 730           # how far ahead run-out is searched; beyond this is "730+"
 TOP_COVER_ROWS = 12          # bars on the "lowest days of cover" chart
-MAX_TABLE_ROWS = 500         # rows returned per table (a flag says when more exist)
+MAX_TABLE_ROWS = 2000        # rows returned per table (a flag says when more exist)
 PROJECTION_MIN_DAYS = 60     # item stock projection: shortest span
 PROJECTION_MAX_DAYS = 180    # item stock projection: longest span
 BACKTEST_MIN_SAMPLES = 6     # fewest past forecasts needed before a range / accuracy is shown
 BAND_LOW_Q = 0.10            # forecast range = 10th..90th percentile of how past forecasts missed
 BAND_HIGH_Q = 0.90
-OPEN_PO_STATUS = "In-Transit"   # purchase orders with this status count as "on order"
+# Where "on order" comes from:
+#   "inventory" - stock in transit on the snapshot date (Inventory_Stock.In_Transit_Qty). This is the same figure the
+#                 Inventory Analysis page shows as "in transit", so the two pages always agree.
+#   "purchase"  - purchase orders with status OPEN_PO_STATUS that are not older than OPEN_PO_MAX_AGE_DAYS.
+ON_ORDER_SOURCE = "inventory"
+OPEN_PO_STATUS = "In-Transit"   # (purchase source) orders with this status count as "on order"
+OPEN_PO_MAX_AGE_DAYS = 90       # an order still "In-Transit" this long after its PO date is stale (not counted as arriving)
 
 # --- Stock status classes (order = precedence AND display order) -------------
 STATUS_CRITICAL = "Critical"

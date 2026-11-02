@@ -1,5 +1,8 @@
 """Executor, resolver and time-handling edge cases, each checked against independent pandas."""
 
+from dataclasses import replace
+from datetime import date
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -68,8 +71,9 @@ def test_fiscal_year_boundaries(store, run):
     assert rs.totals["consumption_value"] == pytest.approx(want)
 
 
-def test_fy_partly_outside_data_is_clipped_and_explained(run):
-    rs = run(time=TimeSpec(kind="fiscal_year", fiscal_year=2025))
+def test_period_partly_outside_data_is_clipped_and_explained(run):
+    # the data starts on 1 Apr 2024, so Jan-Jun 2024 is only half covered
+    rs = run(time=TimeSpec(kind="between", start_date="2024-01-01", end_date="2024-06-30"))
     assert any("data covers" in n for n in rs.notes)
 
 
@@ -80,15 +84,17 @@ def test_period_with_no_data_is_refused(cat, settings):
 
 def test_relative_periods_anchor_on_asof_not_today(cat, settings):
     rq = resolve_query(make_spec(time=TimeSpec(kind="relative", unit="fiscal_year", count=1)), cat, settings)
-    assert (rq.period.start.isoformat(), rq.period.end.isoformat()) == ("2025-04-01", "2026-03-31")
+    assert (rq.period.start.isoformat(), rq.period.end.isoformat()) == ("2024-04-01", "2025-03-31")   # as of 31 Mar 2026 the current FY is FY2026, so last year is FY2025
     rq = resolve_query(make_spec(time=TimeSpec(kind="trailing", unit="month", count=6)), cat, settings)
-    assert (rq.period.start.isoformat(), rq.period.end.isoformat()) == ("2026-07-01", "2026-12-31")
+    assert (rq.period.start.isoformat(), rq.period.end.isoformat()) == ("2025-10-01", "2026-03-31")
 
 
 def test_previous_period_is_like_for_like(cat, settings):
-    rq = resolve_query(make_spec(time=TimeSpec(kind="relative", unit="fiscal_year", count=0)), cat, settings)
+    # Pretend "today" is 31 Dec 2025: FY2026 is then 9 months old, so the previous period is the SAME 9 months.
+    mid_year = replace(cat, as_of=date(2025, 12, 31))
+    rq = resolve_query(make_spec(time=TimeSpec(kind="relative", unit="fiscal_year", count=0)), mid_year, settings)
     prev = previous_period(rq.period)
-    assert (prev.start.isoformat(), prev.end.isoformat()) == ("2025-04-01", "2025-12-31")   # same 9 months
+    assert (prev.start.isoformat(), prev.end.isoformat()) == ("2024-04-01", "2024-12-31")   # same 9 months
 
 
 def test_budget_widens_to_whole_months(cat, settings):
@@ -137,7 +143,10 @@ def test_empty_result_is_explained(store, cat, run):
 
 
 def test_in_progress_period_is_labelled_to_date(cat, settings):
+    mid_year = replace(cat, as_of=date(2025, 12, 31))             # FY2026 is only 9 months old on that date
+    rq = resolve_query(make_spec(time=TimeSpec(kind="relative", unit="fiscal_year", count=0)), mid_year, settings)
+    assert "to date" in rq.period.label and rq.period.label.endswith("Dec 2025)")
     rq = resolve_query(make_spec(time=TimeSpec(kind="relative", unit="fiscal_year", count=0)), cat, settings)
-    assert "to date" in rq.period.label and rq.period.label.endswith("Dec 2026)")
+    assert "to date" not in rq.period.label                      # the data ends exactly at the end of FY2026
     rq = resolve_query(make_spec(time=TimeSpec(kind="relative", unit="fiscal_year", count=1)), cat, settings)
     assert "to date" not in rq.period.label                      # a finished year is not "to date"

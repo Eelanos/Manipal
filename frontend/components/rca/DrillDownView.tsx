@@ -18,22 +18,29 @@ export default function DrillDownView({
 }) {
   const [path, setPath] = useState<string[]>(initialPath);
   const [data, setData] = useState<RcaAnalysis | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<string | null>(null);
 
-  useEffect(() => { setPath(initialPath); }, [initialPath.join("|")]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // A new starting path from the parent replaces the current one (adjusted while rendering, not in an effect).
+  const startKey = initialPath.join("|");
+  const [seenStart, setSeenStart] = useState(startKey);
+  if (seenStart !== startKey) { setSeenStart(startKey); setPath(initialPath); }
+
+  // `done` records which request last finished; the page is "loading" until the current request has. It is only
+  // set when a response arrives, never at the start of the effect.
+  const pathKey = path.join("|");
+  const reqKey = [params.metric, params.month, params.compare, JSON.stringify(filters), pathKey].join("#");
+  const [done, setDone] = useState<{ key: string; err: string | null } | null>(null);
+  const loading = done?.key !== reqKey;
+  const err = done?.key === reqKey ? done.err : null;
 
   useEffect(() => {
     const ac = new AbortController();
-    setLoading(true); setErr(null);
     fetchRcaAnalysis(params, filters, path, ac.signal, true)
-      .then((d) => { setData(d); })
-      .catch((e) => { if (e.name !== "AbortError") setErr(String(e.message ?? e)); })
-      .finally(() => { if (!ac.signal.aborted) setLoading(false); });
+      .then((d) => { setData(d); setDone({ key: reqKey, err: null }); })
+      .catch((e) => { if (e.name !== "AbortError") setDone({ key: reqKey, err: String(e.message ?? e) }); });
     return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.metric, params.month, params.compare, filters, path.join("|")]);
+  }, [reqKey]);
 
   // Tabs: the most concentrated view first.
   const dims = useMemo(() => {
@@ -42,7 +49,9 @@ export default function DrillDownView({
     return [...data.dimensions].sort((a, b) => best(b) - best(a));
   }, [data]);
   const active = dims.find((d) => d.key === tab) ?? dims[0];
-  useEffect(() => { setTab(null); }, [path.join("|")]);              // eslint-disable-line react-hooks/exhaustive-deps
+  // Going deeper starts on the most concentrated tab again.
+  const [seenPath, setSeenPath] = useState(pathKey);
+  if (seenPath !== pathKey) { setSeenPath(pathKey); setTab(null); }
 
   const m = data?.metric;
   const fmt = m?.fmt ?? "percent";

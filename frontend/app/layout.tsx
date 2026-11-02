@@ -31,7 +31,7 @@ export default function RootLayout({
     <html lang="en">
       <body className="antialiased">
         <div className="flex h-screen overflow-hidden bg-canvas">
-          <Sidebar />
+          <Sidebar dates={options ? { min: options.date_min, max: options.date_max } : null} />
           <div className="flex min-w-0 flex-1 flex-col">
             {/* Unit / Period / Product Group / Department: one bar above
                 every page. Same height as the sidebar's brand block. */}

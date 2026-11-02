@@ -10,7 +10,7 @@ export default function CoverChart({ rows, leadDays, options }: {
   rows: CoverRow[]; leadDays: number; options: PredictOptions | null;
 }) {
   return (
-    <div className={`chart-card ${card}`}>
+    <div className={`chart-card flex flex-col ${card}`}>
       <h2 className={h2}>Lowest days of cover</h2>
       <p className={sub}>
         Days the current stock lasts. Bars left of the dashed line run out before a new order ({leadDays}d) could arrive.
@@ -18,8 +18,11 @@ export default function CoverChart({ rows, leadDays, options }: {
       {rows.length === 0 ? (
         <p className="py-16 text-center text-sm text-slate-500">No items with recent usage in this selection.</p>
       ) : (
-        <ResponsiveContainer width="100%" height={Math.max(220, rows.length * 30 + 60)}>
-          <BarChart data={rows} layout="vertical" margin={{ top: 22, right: 72, bottom: 4, left: 8 }}>
+        // The card can be stretched by its neighbour in the grid: let the chart use that height
+        // (never less than its natural size) instead of leaving blank space under the bars.
+        <div className="min-h-0 flex-1" style={{ minHeight: Math.max(220, rows.length * 30 + 60) }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={rows} layout="vertical" margin={{ top: 22, right: 150, bottom: 4, left: 8 }}>
             <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
             {/* Always wide enough to show the delivery-time line, even when every bar is short. */}
             <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} domain={[0, (max: number) => Math.max(max, leadDays * 2)]}
@@ -46,6 +49,7 @@ export default function CoverChart({ rows, leadDays, options }: {
             </Bar>
           </BarChart>
         </ResponsiveContainer>
+        </div>
       )}
     </div>
   );

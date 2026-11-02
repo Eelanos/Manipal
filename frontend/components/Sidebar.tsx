@@ -37,7 +37,12 @@ function NavButton({ icon, onClick, children }: {
   );
 }
 
-export default function Sidebar() {
+// "Apr 2024" from an ISO date. Read as UTC so the month cannot shift with the viewer's time zone.
+const monthYear = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+
+// `dates` is the data range from /api/filter-options, so the footer never goes stale when the data changes.
+export default function Sidebar({ dates }: { dates?: { min: string; max: string } | null }) {
   const path = usePathname();
 
   return (
@@ -97,7 +102,7 @@ export default function Sidebar() {
         <p className="text-[11px] leading-tight text-slate-400">
           Demo environment &middot; synthetic data
           <br />
-          Jan 2025 &ndash; Dec 2026
+          {dates ? `${monthYear(dates.min)} \u2013 ${monthYear(dates.max)}` : "\u00a0"}
         </p>
       </div>
     </aside>

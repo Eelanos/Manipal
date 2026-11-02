@@ -43,8 +43,11 @@ export default function ForecastChart({ f }: { f: Forecast }) {
     <div className={`chart-card ${card}`}>
       <h2 className={h2}>Expected demand, next 3 months</h2>
       <p className={sub}>
-        Dark = actual, blue = forecast (recent daily usage × the month&apos;s usual pattern). Whisker = likely range
-        {f.accuracy_pct !== null ? `. About ${f.accuracy_pct.toFixed(0)}% accurate when tested on past months` : ""}.
+        Dark = actual, blue = forecast (recent daily usage × the month&apos;s usual pattern).
+        {f.range_available ? " Whisker = likely range." : ""}
+        {f.accuracy_pct !== null && (
+          <span className="block">About {f.accuracy_pct.toFixed(0)}% accurate when tested on past months.</span>
+        )}
       </p>
       {!f.has_forecast ? (
         <p className="py-16 text-center text-sm text-slate-500">
@@ -85,7 +88,6 @@ function ForecastTable({ f }: { f: Forecast }) {
         <tr className="text-[11px] uppercase tracking-wide text-slate-500">
           <th className="py-2 text-left font-semibold">Month</th>
           <th className="py-2 text-right font-semibold">Forecast</th>
-          <th className="py-2 text-right font-semibold">Likely range</th>
           <th className="py-2 text-right font-semibold" title="Actual spend in the same month a year earlier">Same month, last year</th>
           <th className="py-2 text-right font-semibold">Change</th>
         </tr>
@@ -95,7 +97,6 @@ function ForecastTable({ f }: { f: Forecast }) {
           <tr key={p.month} className="border-t border-slate-100">
             <td className="py-1.5 text-slate-900">{p.label}</td>
             <td className="py-1.5 text-right font-semibold tabular-nums text-slate-900">{crore(p.forecast as number)}</td>
-            <td className="py-1.5 text-right tabular-nums">{p.low !== null && p.high !== null ? `${crore(p.low)} – ${crore(p.high)}` : "—"}</td>
             <td className="py-1.5 text-right tabular-nums">{ly !== null ? crore(ly) : "—"}</td>
             <td className="py-1.5 text-right tabular-nums">{chg !== null ? `${chg >= 0 ? "▲" : "▼"} ${Math.abs(chg).toFixed(1)}%` : "—"}</td>
           </tr>
