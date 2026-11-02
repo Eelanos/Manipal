@@ -13,7 +13,7 @@ const itemClass = (active: boolean) =>
       : "border-transparent text-slate-200 hover:bg-white/10"}`;
 
 const sectionClass =
-  "px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-400";
+  "px-3 pb-1 pt-8 text-[11px] font-semibold uppercase tracking-wide text-slate-400";
 
 function NavLink({ href, icon, active, children }: {
   href: string; icon: NavIconName; active: boolean; children: React.ReactNode;
@@ -49,7 +49,7 @@ export default function Sidebar() {
       </div>
 
       <nav className="flex-1 overflow-y-auto p-3">
-        <p className={sectionClass}>Analytics</p>
+        <p className={`${sectionClass} !pt-4`}>Analytics</p>
         <div className="space-y-0.5">
           {DASHBOARDS.map((d) => (
             <NavLink key={d.slug} href={`/${d.slug}`}

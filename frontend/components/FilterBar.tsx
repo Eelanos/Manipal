@@ -17,7 +17,7 @@ interface Props {
   onChange: (next: FilterState) => void;
 }
 
-// One row above every page: Unit, Period, Stock Take Group, Department. The
+// One row above every page: Unit, Period, Product Group, Department. The
 // network hierarchy (Region/Zone/Cluster) is scoped to two units for this
 // presentation, so only Unit is shown; see app/config.py: ACTIVE_UNITS to
 // restore the rest later.
@@ -59,7 +59,7 @@ export default function FilterBar({ options, value, onChange }: Props) {
           </select>
         </div>
         <div className="min-w-0">
-          <label className={label}>Stock Take Group</label>
+          <label className={label}>Product Group</label>
           <select className={cls} value={value.stock_take_group}
                   onChange={(e) => set({ stock_take_group: e.target.value })}>
             <option value="All">All Groups</option>

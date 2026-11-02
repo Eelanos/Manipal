@@ -33,7 +33,7 @@ export default function RootLayout({
         <div className="flex h-screen overflow-hidden bg-canvas">
           <Sidebar />
           <div className="flex min-w-0 flex-1 flex-col">
-            {/* Unit / Period / Stock Take Group / Department: one bar above
+            {/* Unit / Period / Product Group / Department: one bar above
                 every page. Same height as the sidebar's brand block. */}
             <div className="flex h-20 shrink-0 items-center border-b border-slate-200 bg-white px-6">
               <FilterBar options={options} value={filters} onChange={setFilters} />
@@ -46,7 +46,8 @@ export default function RootLayout({
               </FilterProvider>
             </main>
           </div>
-          {/* "Ask Manipal" chat: a floating button + panel (position: fixed), so it takes no layout space. */}
+          {/* "Ask QBER" chat: a floating button + a page-sized panel covering the area right of the
+              sidebar (position: fixed), so it takes no layout space. */}
           <ChatDock />
         </div>
       </body>

@@ -22,12 +22,27 @@ class Kpi(BaseModel):
     # client can correct us in one sentence instead of quietly deciding the
     # dashboard is wrong.
     note: str | None = None
+    # Year-on-year comparison, shown as an up/down arrow on the card. Only the
+    # Inventory Analysis cards fill these in; every other card leaves them None
+    # and keeps its existing look.
+    #   delta_label  - short text next to the arrow, e.g. "vs Dec 25"
+    #   delta_good   - True / False when the direction is good / bad for this
+    #                  metric (e.g. more days of stock is bad); None = neutral
+    #   delta_basis  - the one-line explanation shown on hover
+    delta_label: str | None = None
+    delta_good: bool | None = None
+    delta_basis: str | None = None
 
 
 class ChartSeries(BaseModel):
     """One line/bar/slice group. data is a list of {x, y} style dicts."""
     name: str
     data: list[dict[str, Any]]
+    # Optional per-series overrides. Unset = the chart's own colour order and
+    # value format, which is how every existing chart behaves.
+    color: str | None = None                          # "#rrggbb"
+    value_format: Literal["currency", "percent", "number"] | None = None
+    axis: Literal["left", "right"] | None = None      # "right" = secondary value axis (combo charts)
 
 
 
@@ -40,6 +55,7 @@ class Chart(BaseModel):
     reference_line: float | None = None
     value_format: Literal["currency", "percent", "number"] = "currency"
     drilldown: dict[str, list[dict[str, Any]]] | None = None
+    hint: str | None = None          # small helper text under the chart title, e.g. "Click on a month ..."
 
 
 class Table(BaseModel):

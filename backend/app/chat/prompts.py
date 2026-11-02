@@ -95,6 +95,12 @@ def build_examples(cat: Catalog) -> list[tuple[str, Plan]]:
                 title="Formulary compliance, last 6 months", measures=["formulary_compliance_pct"],
                 time_grain="month", time=TimeSpec(kind="trailing", unit="month", count=6),
                 filters=[f("unit", unit)])]))
+    if unit:
+        add("Show unit-wise consumption as a bar and inventory days as a line in a single dashboard",
+            Plan(action="query", message=None, queries=[_q(
+                title="Consumption and inventory days by unit",
+                measures=["consumption_value", "inventory_days"], group_by=["unit"],
+                time=TimeSpec(kind="relative", unit="month", count=0), chart="combo")]))
     add("Top 5 doctors by switchable opportunity",
         Plan(action="query", message=None, queries=[_q(
             title="Top 5 doctors by switchable opportunity", measures=["switchable_opportunity_value"],
@@ -136,7 +142,7 @@ def planner_system_prompt() -> str:
     sample_fy = cat.fiscal.fy_of(cat.as_of)
     fy_s = date(cat.fiscal.fy_start_year(sample_fy), cat.fiscal.start_month, 1)
     fy_range = fmt_range(fy_s, month_end(add_months(fy_s, 11)))
-    return f"""You are the query planner for "Ask Manipal", a chat assistant over a hospital pharmacy and inventory dataset (consumption, formulary and SOB compliance, stock, purchases, budget).
+    return f"""You are the query planner for "Ask QBER", a chat assistant over a hospital pharmacy and inventory dataset (consumption, formulary and SOB compliance, stock, purchases, budget).
 
 You do NOT answer questions and you never write code, SQL or numbers. You translate the user's question into a structured plan; a deterministic engine runs it and a separate step writes the answer. Output only the plan.
 
@@ -169,6 +175,7 @@ You do NOT answer questions and you never write code, SQL or numbers. You transl
 - Multi-part questions: one query per part, at most {st.max_queries_per_plan}. Do not repeat a query.
 - Follow-ups ("and for Goa?", "now by month", "top 3 instead"): keep the previous plan's measures, filters and period and change only what the user changed. The previous plans are shown under CONVERSATION.
 - chart: leave "auto" unless the user names a chart type.
+- ONE chart with different chart types per measure (e.g. "consumption as bars and inventory days as a line in a single dashboard"): make ONE query holding all those measures, the measure(s) to draw as bars FIRST and the ones to draw as lines AFTER, and set chart="combo". Never split it into several queries, and use chart="combo" only when two or more measures are drawn together. (Measures with different units get their own axis automatically.)
 - title: 3-8 plain words, no numbers the user did not say. Name WHAT is shown ("Budget variance by department"), never a conclusion or a claim the data may not support ("Departments Over Budget", "Top Overspenders") - the result may show the opposite.
 - action=out_of_scope when the dataset cannot answer (forecasts, patient outcomes, prices of other hospitals, causes, editing data, topics unrelated to this data). Say briefly what IS available. action=chat only for greetings and "what can you do". Keep messages to 1-2 sentences.
 
@@ -202,7 +209,7 @@ def repair_message(errors: list[str]) -> str:
 # ---------------------------------------------------------------------------
 # Narrator
 # ---------------------------------------------------------------------------
-NARRATOR_SYSTEM = """You write the short written answer that appears above the tables and charts in "Ask Manipal", a hospital pharmacy and inventory analytics assistant. The reader is a pharmacy or supply-chain manager.
+NARRATOR_SYSTEM = """You write the short written answer that appears above the tables and charts in "Ask QBER", a hospital pharmacy and inventory analytics assistant. The reader is a pharmacy or supply-chain manager.
 
 You receive the user's question and a FACT SHEET. Every number you may mention is a fact with an id like [f3].
 

@@ -415,6 +415,63 @@ def closing_stock_by_dept(inv_df: pd.DataFrame) -> dict:
         ]
     return out
 
+AGE_BUCKETS = ["Below 30", "30 - 60", "60 - 90", "Above 90"]
+
+
+def ageing_by_unit(inv_df: pd.DataFrame) -> dict:
+    """Month -> one row per unit with its stock value in each ageing bucket, for the
+    Stock Ageing drill-down table. Same month grouping the chart itself uses, so
+    a row's buckets add up to that unit's share of the bar."""
+    out: dict[str, list[dict]] = {}
+    for month, grp in inv_df.groupby("Month_Start"):
+        piv = (grp.pivot_table(index="Unit_Name", columns="Ageing", values="Stock_Value",
+                               aggfunc="sum", fill_value=0.0)
+                  .reindex(columns=AGE_BUCKETS, fill_value=0.0))
+        piv = piv.loc[piv.sum(axis=1).sort_values(ascending=False).index]
+        out[month.strftime("%b %y")] = [
+            {"Unit": str(unit), **{b: float(row[b]) for b in AGE_BUCKETS}}
+            for unit, row in piv.iterrows()
+        ]
+    return out
+
+
+def expiry_value_by_month(inv_df: pd.DataFrame) -> list[dict]:
+    """One row per month: stock value that is near expiry / already expired."""
+    rows = []
+    for month, grp in inv_df.groupby("Month_Start"):
+        flag = grp["Expiry/Near Expiry"]
+        rows.append({
+            "month": month.strftime("%b %y"),
+            "near": float(grp.loc[flag == "Near Expiry", "Stock_Value"].sum()),
+            "expired": float(grp.loc[flag == "Expired", "Stock_Value"].sum()),
+        })
+    return rows
+
+
+def expiry_by_unit_and_dept(inv_df: pd.DataFrame) -> dict:
+    """Two-level drill-down for the Expiry Risk chart, in ONE dictionary:
+        "Jan 26"        -> [{Unit, "Near Expiry", "Expiry"}, ...]          (click a bar)
+        "Jan 26|KHO"    -> [{Department, "Near Expiry", "Expiry"}, ...]    (click a unit row)
+    Values are stock value in rupees. "Expiry" = already expired stock."""
+    out: dict[str, list[dict]] = {}
+    risk = inv_df[inv_df["Expiry/Near Expiry"].isin(["Near Expiry", "Expired"])]
+    for month, grp in risk.groupby("Month_Start"):
+        mk = month.strftime("%b %y")
+
+        def split(g: pd.DataFrame, by: str, label: str) -> list[dict]:
+            piv = (g.pivot_table(index=by, columns="Expiry/Near Expiry", values="Stock_Value",
+                                 aggfunc="sum", fill_value=0.0)
+                     .reindex(columns=["Near Expiry", "Expired"], fill_value=0.0))
+            piv = piv.loc[piv.sum(axis=1).sort_values(ascending=False).index]
+            return [{label: str(k), "Near Expiry": float(r["Near Expiry"]), "Expiry": float(r["Expired"])}
+                    for k, r in piv.iterrows()]
+
+        out[mk] = split(grp, "Unit_Name", "Unit")
+        for unit, ug in grp.groupby("Unit_Name"):
+            out[f"{mk}|{unit}"] = split(ug, "Dept_Name", "Department")
+    return out
+
+
 def stock_and_days_by_unit(inv_df: pd.DataFrame, cons_df: pd.DataFrame) -> dict:
     """Month -> one row per unit with its stock value and Inventory Days, for
     the Consumption Trend drill-down. Inventory Days is the same formula as the

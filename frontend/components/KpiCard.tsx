@@ -17,7 +17,23 @@ export default function KpiCard({ kpi }: { kpi: Kpi }) {
       <p className={`mt-2 text-2xl font-semibold ${TONE[kpi.tone]}`}>
         {kpi.display}
       </p>
-      {kpi.delta_pct !== null && (
+      {/* Inventory Analysis cards: year-on-year arrow (delta_label is set only there). */}
+      {kpi.delta_label ? (
+        kpi.delta_pct != null ? (
+          <p title={kpi.delta_basis ?? undefined}
+             className={`mt-1 flex items-center gap-1 text-xs font-medium ${
+               kpi.delta_good === true ? "text-emerald-600"
+               : kpi.delta_good === false ? "text-red-600" : "text-slate-500"}`}>
+            <span aria-hidden>{kpi.delta_pct >= 0 ? "\u25B2" : "\u25BC"}</span>
+            <span>{kpi.delta_pct >= 0 ? "Up" : "Down"} {Math.abs(kpi.delta_pct).toFixed(1)}%</span>
+            <span className="font-normal text-slate-400">{kpi.delta_label}</span>
+          </p>
+        ) : (
+          <p title={kpi.delta_basis ?? undefined} className="mt-1 text-xs text-slate-400">
+            {kpi.delta_label}
+          </p>
+        )
+      ) : kpi.delta_pct !== null && (
         <p className={`mt-1 text-xs ${kpi.delta_pct >= 0 ? "text-emerald-600" : "text-red-600"}`}>
           {kpi.delta_pct >= 0 ? "up" : "down"} {Math.abs(kpi.delta_pct).toFixed(1)}%
         </p>

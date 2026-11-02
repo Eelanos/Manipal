@@ -1,12 +1,13 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchSuggestions, streamChat } from "@/lib/chat-api";
 import type {
   AssistantMessage, ChatEvent, ChatMessage, HistoryTurn, Suggestions,
 } from "@/lib/chat-types";
 import {
-  ArrowIcon, ChatIcon, CompressIcon, ExpandIcon, MinimizeIcon, PlusIcon, SendIcon, SparkIcon, StopIcon,
+  ChatIcon, MinimizeIcon, PlusIcon, SendIcon, SparkIcon, StopIcon,
 } from "./icons";
 import MessageView from "./MessageView";
 
@@ -17,13 +18,14 @@ const monthYear = (iso: string) => {
 };
 
 /**
- * "Ask Manipal": a floating button (bottom-right) that opens a floating chat card.
- * Minimising keeps the conversation; expanding gives charts and tables room to breathe.
+ * "Ask QBER": a floating button (bottom-right) and the sidebar's Ask QBER item open the chat.
+ * The chat fills the whole page area to the right of the sidebar (the sidebar stays usable),
+ * so charts and tables have room. Closing keeps the conversation.
  * It lives in app/layout.tsx, so the conversation survives moving between dashboards.
  */
 export default function ChatDock() {
   const [open, setOpen] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const pathname = usePathname();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -37,23 +39,41 @@ export default function ChatDock() {
     setMessages((all) => all.map((m) => (m.role === "assistant" && m.id === id ? fn(m) : m)));
   }, []);
 
-  const openDock = () => {
-    setOpen(true);
-    if (!meta) fetchSuggestions().then(setMeta).catch(() => setMeta({ suggestions: [] }));
-    setTimeout(() => inputRef.current?.focus(), 220);
-  };
+  // Only the data range in the header is needed from this call now.
+  const metaRequested = useRef(false);
+  const openDock = useCallback(() => {
+    setOpen(true);                       // idempotent: opening an open panel is a no-op
+    if (!metaRequested.current) {
+      metaRequested.current = true;
+      fetchSuggestions().then(setMeta).catch(() => { metaRequested.current = false; });
+    }
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }, []);
 
-  // The sidebar's "Ask QBER" button opens the panel via this window event.
+  // The sidebar's "Ask QBER" button opens the panel via this window event. The listener is
+  // registered once (stable handler), so no click can ever land in a re-subscribe gap.
   useEffect(() => {
-    const onOpen = () => openDock();
-    window.addEventListener("qber:open-chat", onOpen);
-    return () => window.removeEventListener("qber:open-chat", onOpen);
-  });
+    window.addEventListener("qber:open-chat", openDock);
+    return () => window.removeEventListener("qber:open-chat", openDock);
+  }, [openDock]);
 
-  // Esc minimises the panel.
+  // Picking another page in the sidebar leaves the chat, so the chat never sits over the page
+  // the user just chose. (Compared with the previous path so it does not fire on first render.)
+  const lastPath = useRef(pathname);
+  useEffect(() => {
+    if (lastPath.current !== pathname) {
+      lastPath.current = pathname;
+      setOpen(false);
+    }
+  }, [pathname]);
+
+  // Esc closes the panel.
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const onKey = (e: KeyboardEvent) => {
+      // Esc belongs to an open dialog (drill-down, save-to-workspace) first.
+      if (e.key === "Escape" && !document.querySelector('[aria-modal="true"]')) setOpen(false);
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
@@ -118,9 +138,6 @@ export default function ChatDock() {
 
   const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
   const dataRange = meta?.data ? `${monthYear(meta.data.from)} – ${monthYear(meta.data.to)}` : null;
-  const size = expanded
-    ? "sm:w-[min(1000px,calc(100vw-3rem))] sm:h-[calc(100vh-3rem)]"
-    : "sm:w-[430px] sm:h-[min(700px,calc(100vh-3rem))]";
 
   return (
     <>
@@ -128,31 +145,33 @@ export default function ChatDock() {
       <button
         type="button"
         onClick={openDock}
-        aria-label="Open Ask Manipal"
+        aria-label="Open Ask QBER"
         className={`group fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-brand to-brand-dark text-white shadow-lg shadow-red-900/30 ring-4 ring-white/70 transition duration-200 hover:scale-105 hover:shadow-xl ${open ? "pointer-events-none scale-50 opacity-0" : "scale-100 opacity-100"}`}
       >
         <ChatIcon size={24} />
         <span className="pointer-events-none absolute right-16 whitespace-nowrap rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-medium text-white opacity-0 shadow transition group-hover:opacity-100">
-          Ask Manipal
+          Ask QBER
         </span>
       </button>
 
-      {/* Floating panel. Stays mounted so the conversation and scroll position survive minimising. */}
+      {/* The chat page. Covers everything right of the sidebar (left-64 = the sidebar's w-64 in
+          Sidebar.tsx), so the dashboard behind it is not visible. Stays mounted so the conversation
+          and scroll position survive closing. No transform on this element: a transformed parent
+          would trap the position:fixed drill-down / save dialogs inside it. */}
       <section
         role="dialog"
-        aria-label="Ask Manipal"
+        aria-label="Ask QBER"
         aria-hidden={!open}
         inert={!open}
-        className={`fixed z-50 flex origin-bottom-right flex-col overflow-hidden border border-slate-200 bg-canvas shadow-2xl shadow-slate-900/25 transition duration-200
-          max-sm:inset-0 sm:bottom-6 sm:right-6 sm:rounded-2xl ${size}
-          ${open ? "translate-y-0 scale-100 opacity-100" : "pointer-events-none translate-y-3 scale-95 opacity-0"}`}
+        className={`fixed inset-y-0 right-0 left-64 z-50 flex flex-col overflow-hidden bg-canvas transition-opacity duration-200 max-sm:left-0
+          ${open ? "opacity-100" : "pointer-events-none opacity-0"}`}
       >
-        <header className="flex items-center gap-3 bg-gradient-to-r from-brand to-brand-dark px-4 py-3 text-white">
+        <header className="flex items-center gap-3 bg-gradient-to-r from-brand to-brand-dark px-6 py-3 text-white">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/15 ring-1 ring-white/25">
             <SparkIcon size={18} />
           </span>
           <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-semibold leading-tight">Ask Manipal</h2>
+            <h2 className="text-sm font-semibold leading-tight">Ask QBER</h2>
             <p className="truncate text-[11px] text-red-100">
               {dataRange ? `Data: ${dataRange}` : "Pharmacy & inventory data"}
             </p>
@@ -161,14 +180,12 @@ export default function ChatDock() {
             {messages.length > 0 && (
               <HeaderButton label="New chat" onClick={clear}><PlusIcon /></HeaderButton>
             )}
-            <HeaderButton label={expanded ? "Smaller" : "Larger"} onClick={() => setExpanded(!expanded)} hideOnMobile>
-              {expanded ? <CompressIcon /> : <ExpandIcon />}
-            </HeaderButton>
-            <HeaderButton label="Minimise" onClick={() => setOpen(false)}><MinimizeIcon /></HeaderButton>
+            <HeaderButton label="Close Ask QBER" onClick={() => setOpen(false)}><MinimizeIcon /></HeaderButton>
           </div>
         </header>
 
-        <div ref={scrollRef} className="@container flex-1 space-y-5 overflow-y-auto overflow-x-hidden px-4 py-5">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden px-6 py-6">
+          <div className="@container mx-auto w-full max-w-6xl space-y-5">
           {messages.length === 0 && (
             <div className="space-y-5">
               <div className="rounded-2xl rounded-tl-md border border-slate-200 bg-white p-4 shadow-sm">
@@ -178,20 +195,6 @@ export default function ChatDock() {
                   with a summary, charts and a table you can export.
                 </p>
               </div>
-              {(meta?.suggestions?.length ?? 0) > 0 && (
-                <div>
-                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Try asking</p>
-                  <div className="grid grid-cols-1 gap-2 @2xl:grid-cols-2">
-                    {meta!.suggestions.map((s) => (
-                      <button key={s} type="button" onClick={() => ask(s)}
-                              className="group flex items-center justify-between gap-2 rounded-xl bg-white px-3.5 py-2.5 text-left text-[13px] text-slate-700 shadow-sm ring-1 ring-slate-200 transition hover:text-brand hover:ring-brand/40">
-                        {s}
-                        <span className="text-slate-300 transition group-hover:text-brand"><ArrowIcon /></span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
@@ -204,12 +207,13 @@ export default function ChatDock() {
               <MessageView key={m.id} message={m} onAsk={ask} isLast={m.id === lastAssistant?.id} />
             ),
           )}
+          </div>
         </div>
 
-        <footer className="border-t border-slate-200 bg-white p-3">
+        <footer className="border-t border-slate-200 bg-white px-6 py-3">
           <form
             onSubmit={(e) => { e.preventDefault(); ask(input); }}
-            className="flex items-end gap-2 rounded-2xl border border-slate-300 bg-white py-1.5 pl-3.5 pr-1.5 transition focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20"
+            className="mx-auto flex max-w-6xl items-end gap-2 rounded-2xl border border-slate-300 bg-white py-1.5 pl-3.5 pr-1.5 transition focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20"
           >
             <textarea
               ref={inputRef}
@@ -235,7 +239,7 @@ export default function ChatDock() {
               </button>
             )}
           </form>
-          <p className="mt-2 px-1 text-[10px] leading-snug text-slate-400">
+          <p className="mx-auto mt-2 max-w-6xl px-1 text-[10px] leading-snug text-slate-400">
             Numbers are calculated directly from the dataset; AI only interprets your question and writes the summary.
           </p>
         </footer>

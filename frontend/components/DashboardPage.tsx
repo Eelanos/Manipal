@@ -5,10 +5,12 @@ import ChartPanel from "@/components/ChartPanel";
 import InsightCallout from "@/components/InsightCallout";
 import KpiCard from "@/components/KpiCard";
 import NavIcon from "@/components/NavIcons";
+import SaveToWorkspaceModal from "@/components/SaveToWorkspaceModal";
 import { fetchDashboard } from "@/lib/api";
 import { useFavorites } from "@/lib/favorites";
 import { useFilters } from "@/lib/filter-context";
 import type { DashboardResponse } from "@/lib/types";
+import { dashKey, useWorkspaces } from "@/lib/workspaces";
 
 interface Props {
   slug: string;
@@ -22,6 +24,8 @@ export default function DashboardPage({ slug, title }: Props) {
   const { filters } = useFilters();
   const { favorites, toggle } = useFavorites();
   const isFavorite = favorites.includes(slug);
+  const { assign, unassign } = useWorkspaces();
+  const [picking, setPicking] = useState(false);   // "Save Dashboard to Workspace" dialog
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,8 +43,12 @@ export default function DashboardPage({ slug, title }: Props) {
     <div className="space-y-5">
       <header className="flex items-center gap-2">
         <h1 className="text-2xl font-semibold text-slate-900">{title}</h1>
-        {/* Star: saves this dashboard to Favorites (click again to remove). */}
-        <button type="button" onClick={() => toggle(slug)}
+        {/* Star: asks which workspace to save this dashboard to (click again to remove). */}
+        <button type="button"
+                onClick={() => {
+                  if (isFavorite) { toggle(slug); unassign(dashKey(slug)); }
+                  else setPicking(true);
+                }}
                 aria-pressed={isFavorite}
                 aria-label={isFavorite ? "Remove from favorites" : "Save to favorites"}
                 title={isFavorite ? "Remove from favorites" : "Save to favorites"}
@@ -49,6 +57,17 @@ export default function DashboardPage({ slug, title }: Props) {
           <NavIcon name="favorites" size={20} filled={isFavorite} />
         </button>
       </header>
+
+      {picking && (
+        <SaveToWorkspaceModal
+          itemTitle={title}
+          onClose={() => setPicking(false)}
+          onSave={(wsId) => {
+            if (!isFavorite) toggle(slug);
+            assign(dashKey(slug), wsId);
+            setPicking(false);
+          }} />
+      )}
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">

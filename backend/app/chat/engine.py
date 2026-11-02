@@ -245,7 +245,9 @@ class Evaluator:
             for key, sv in stock.items():
                 mv = float(mtd.get(key, 0.0)) if mtd is not None else 0.0
                 values.append(dashboard_metrics.inventory_days(float(sv), mv, d.day) if mv else np.nan)
-                kt = key if isinstance(key, tuple) else (key,)
+                # With no group-by dimensions the dummy "__all__" key must not leak into the
+                # index when a time bucket supplies the only key column (monthly trend).
+                kt = (key if isinstance(key, tuple) else (key,)) if (self.group_dims or bucket is None) else ()
                 tuples.append(kt + ((bucket,) if bucket is not None else ()))
         names = self._key_cols
         idx = (pd.MultiIndex.from_tuples(tuples, names=names) if len(names) > 1

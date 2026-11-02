@@ -260,6 +260,28 @@ def build_table(rs: ResultSet) -> Optional[ChatTable]:
 # ---------------------------------------------------------------------------
 # Charts
 # ---------------------------------------------------------------------------
+MAX_COMBO_SERIES = 4
+
+
+def _combo_chart(cid: str, title: str, x_key: str, rows: list[dict], x_col: str,
+                 ms: list[sem.Measure]) -> Chart:
+    """Several measures in ONE chart: the first is drawn as bars, the others as
+    lines (the dashboards' own combo convention). A measure whose unit differs
+    from the bars' (rupees vs days, say) goes on a second axis on the right, so
+    both stay readable; the legend and tooltip name each series."""
+    ms = ms[:MAX_COMBO_SERIES]
+    base = _FORMAT[ms[0].unit]
+    series = [
+        ChartSeries(
+            name=m.label, value_format=_FORMAT[m.unit],
+            axis="right" if _FORMAT[m.unit] != base else None,
+            data=[{x_key: r[x_col], "value": _num(r[m.id])} for r in rows])
+        for m in ms
+    ]
+    return Chart(id=cid, title=title, type="combo", x_key=x_key, series=series,
+                 reference_line=None, value_format=base)
+
+
 def _group_by_format(measures: list[sem.Measure]) -> dict[str, list[sem.Measure]]:
     out: dict[str, list[sem.Measure]] = {}
     for m in measures:
@@ -294,6 +316,9 @@ def build_charts(rs: ResultSet, store, block_id: str) -> tuple[list[Chart], list
         return [], notes
 
     # --- B. trend over time, no breakdown ----------------------------------------
+    if not dims and grain != "none" and hint == "combo" and len(q.measures) >= 2:
+        rows = [{"_period": r["_period"], **{m.id: r[m.id] for m in q.measures}} for r in df.to_dict("records")]
+        return [_combo_chart(cid(0), q.title, "period", rows, "_period", q.measures)], notes
     if not dims and grain != "none":
         for fmt, ms in _group_by_format(q.measures).items():
             ctype = hint if hint in ("line", "bar") else ("line" if len(df) >= 3 else "bar")
@@ -313,6 +338,11 @@ def build_charts(rs: ResultSet, store, block_id: str) -> tuple[list[Chart], list
         if len(df) > MAX_CHART_CATEGORIES:
             notes.append(f"The chart shows the top {MAX_CHART_CATEGORIES} of {len(df)}; the table has all of them.")
         longest = max((len(str(x)) for x in sub[d]), default=0)
+        if hint == "combo" and len(q.measures) >= 2:
+            rows = [{"label": str(r[d]), **{m.id: r[m.id] for m in q.measures}} for r in sub.to_dict("records")]
+            if len(q.measures) > MAX_COMBO_SERIES:
+                notes.append(f"The chart shows the first {MAX_COMBO_SERIES} measures; the table has all of them.")
+            return [_combo_chart(cid(0), q.title, "label", rows, "label", q.measures)], notes
         fmts = _group_by_format(q.measures)
         for fmt, ms in fmts.items():
             donut_ok = (hint == "donut" and len(ms) == 1 and is_additive(ms[0])

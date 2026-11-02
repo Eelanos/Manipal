@@ -14,11 +14,19 @@ export interface Kpi {
   delta_pct: number | null;
   tone: Tone;
   note: string | null;
+  // Year-on-year arrow (Inventory Analysis cards only; other cards leave these unset).
+  delta_label?: string | null;
+  delta_good?: boolean | null;
+  delta_basis?: string | null;
 }
 
 export interface ChartSeries {
   name: string;
   data: Record<string, string | number>[];
+  // Optional per-series overrides (unset = the chart's own colour order / format).
+  color?: string | null;
+  value_format?: "currency" | "percent" | "number" | null;
+  axis?: "left" | "right" | null;      // "right" = secondary value axis (combo charts)
 }
 
 export interface Chart {
@@ -29,7 +37,8 @@ export interface Chart {
   series: ChartSeries[];
   reference_line: number | null;
   value_format: "currency" | "percent" | "number";
-  drilldown?: Record<string, { Department: string; Value: number }[] | { name: string; value: number }[] | { Unit: string; Stock: number; "Inventory Days": number }[]> | null;
+  hint?: string | null;                // small helper text under the title
+  drilldown?: Record<string, { Department: string; Value: number }[] | { name: string; value: number }[] | { Unit: string; Stock: number; "Inventory Days": number }[] | Record<string, string | number>[]> | null;
 }
 
 export interface TableColumn {

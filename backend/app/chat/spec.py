@@ -21,7 +21,7 @@ DimensionId = Literal[tuple(sem.DIMENSIONS)]
 
 TimeGrain = Literal["none", "month", "quarter", "fiscal_year", "year"]
 ChartHint = Literal["auto", "line", "bar", "hbar", "stacked_bar", "donut",
-                    "grouped_bar", "table_only"]
+                    "grouped_bar", "combo", "table_only"]
 PeriodKind = Literal["all", "relative", "trailing", "fiscal_year", "calendar_year",
                      "month", "fiscal_quarter", "between"]
 PeriodUnit = Literal["month", "quarter", "fiscal_year", "year"]

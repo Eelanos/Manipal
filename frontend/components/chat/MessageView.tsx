@@ -4,8 +4,10 @@ import { useState } from "react";
 import ChartPanel from "@/components/ChartPanel";
 import KpiCard from "@/components/KpiCard";
 import NavIcon from "@/components/NavIcons";
+import SaveToWorkspaceModal from "@/components/SaveToWorkspaceModal";
 import type { AssistantMessage, ResultBlock } from "@/lib/chat-types";
 import { dashboardId, useSavedDashboards } from "@/lib/saved-dashboards";
+import { aiKey, useWorkspaces } from "@/lib/workspaces";
 import ChatTable from "./ChatTable";
 import { ArrowIcon, BulbIcon, CopyIcon } from "./icons";
 import RichText from "./RichText";
@@ -23,6 +25,8 @@ export function Block({ block }: { block: ResultBlock }) {
   const [showTable, setShowTable] = useState(false);
   const { saved, toggle } = useSavedDashboards();
   const isSaved = saved.some((d) => d.id === dashboardId(block));
+  const { assign, unassign } = useWorkspaces();
+  const [picking, setPicking] = useState(false);     // "Save Dashboard to Workspace" dialog
   const hasChart = block.charts.length > 0;
   return (
     <section className="space-y-3">
@@ -69,14 +73,28 @@ export function Block({ block }: { block: ResultBlock }) {
               )}
             </div>
           )}
-          {/* Saves this dashboard to Favorites (click again to remove it). */}
+          {/* Asks which workspace to save this dashboard to (click again to remove it). */}
           <div className="flex justify-end">
-            <button type="button" onClick={() => toggle(block)} aria-pressed={isSaved}
+            <button type="button" aria-pressed={isSaved}
+                    onClick={() => {
+                      if (isSaved) { toggle(block); unassign(aiKey(dashboardId(block))); }
+                      else setPicking(true);
+                    }}
                     className="inline-flex items-center gap-1.5 rounded-md bg-brand px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-dark">
               <NavIcon name="favorites" size={14} filled={isSaved} />
               {isSaved ? "Saved" : "Save Dashboard"}
             </button>
           </div>
+          {picking && (
+            <SaveToWorkspaceModal
+              itemTitle={block.title}
+              onClose={() => setPicking(false)}
+              onSave={(wsId) => {
+                if (!isSaved) toggle(block);
+                assign(aiKey(dashboardId(block)), wsId);
+                setPicking(false);
+              }} />
+          )}
         </>
       )}
     </section>
