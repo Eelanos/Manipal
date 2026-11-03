@@ -101,5 +101,14 @@ export function useWorkspaces() {
     write({ ...cur, items: rest });
   }, []);
 
-  return { workspaces: state.list, items: state.items, create, assign, unassign };
+  /** Delete a workspace and forget which dashboards were assigned to it (the caller removes the
+   *  dashboards themselves). */
+  const removeWorkspace = useCallback((workspaceId: string) => {
+    const cur = parse(read());
+    const items: Record<string, string> = {};
+    for (const [k, id] of Object.entries(cur.items)) if (id !== workspaceId) items[k] = id;
+    write({ list: cur.list.filter((w) => w.id !== workspaceId), items });
+  }, []);
+
+  return { workspaces: state.list, items: state.items, create, assign, unassign, removeWorkspace };
 }

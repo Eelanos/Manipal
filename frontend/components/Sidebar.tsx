@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import NavIcon, { type NavIconName } from "@/components/NavIcons";
 import { DASHBOARDS, PREDICT_NAV, RCA_NAV } from "@/lib/nav";
 
@@ -19,18 +20,21 @@ function NavLink({ href, icon, active, children }: {
   href: string; icon: NavIconName; active: boolean; children: React.ReactNode;
 }) {
   return (
-    <Link href={href} className={itemClass(active)}>
+    // Choosing a page always leaves Ask QBER, even when it is the page already underneath
+    // (the route does not change then, so the chat has to be told explicitly).
+    <Link href={href} className={itemClass(active)}
+          onClick={() => window.dispatchEvent(new Event("qber:close-chat"))}>
       <NavIcon name={icon} />
       {children}
     </Link>
   );
 }
 
-function NavButton({ icon, onClick, children }: {
-  icon: NavIconName; onClick: () => void; children: React.ReactNode;
+function NavButton({ icon, onClick, active = false, children }: {
+  icon: NavIconName; onClick: () => void; active?: boolean; children: React.ReactNode;
 }) {
   return (
-    <button type="button" onClick={onClick} className={itemClass(false)}>
+    <button type="button" onClick={onClick} className={itemClass(active)}>
       <NavIcon name={icon} />
       {children}
     </button>
@@ -38,7 +42,16 @@ function NavButton({ icon, onClick, children }: {
 }
 
 export default function Sidebar() {
-  const path = usePathname();
+  const rawPath = usePathname();
+  // ChatDock announces when Ask QBER opens / closes. While it is open the chat is the page the
+  // user is on, so Ask QBER is the highlighted item and the page underneath is not.
+  const [chatOpen, setChatOpen] = useState(false);
+  useEffect(() => {
+    const onState = (e: Event) => setChatOpen(!!(e as CustomEvent<{ open: boolean }>).detail?.open);
+    window.addEventListener("qber:chat-state", onState);
+    return () => window.removeEventListener("qber:chat-state", onState);
+  }, []);
+  const path = chatOpen ? null : rawPath;
 
   return (
     <aside className="flex w-64 shrink-0 flex-col bg-nav">
@@ -73,7 +86,7 @@ export default function Sidebar() {
             Favorites
           </NavLink>
           {/* Opens the same chat panel as the floating button (ChatDock). */}
-          <NavButton icon="ask"
+          <NavButton icon="ask" active={chatOpen}
                      onClick={() => window.dispatchEvent(new Event("qber:open-chat"))}>
             Ask QBER
           </NavButton>

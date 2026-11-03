@@ -57,6 +57,19 @@ export default function ChatDock() {
     return () => window.removeEventListener("qber:open-chat", openDock);
   }, [openDock]);
 
+  // The sidebar tells the chat to close when any page is chosen (also the page already underneath,
+  // where the route - and so the effect below - does not change).
+  useEffect(() => {
+    const onClose = () => setOpen(false);
+    window.addEventListener("qber:close-chat", onClose);
+    return () => window.removeEventListener("qber:close-chat", onClose);
+  }, []);
+
+  // Tell the sidebar whether the chat is open, so it highlights the right item.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("qber:chat-state", { detail: { open } }));
+  }, [open]);
+
   // Picking another page in the sidebar leaves the chat, so the chat never sits over the page
   // the user just chose. (Compared with the previous path so it does not fire on first render.)
   const lastPath = useRef(pathname);

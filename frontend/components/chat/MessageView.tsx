@@ -6,7 +6,7 @@ import KpiCard from "@/components/KpiCard";
 import NavIcon from "@/components/NavIcons";
 import SaveToWorkspaceModal from "@/components/SaveToWorkspaceModal";
 import type { AssistantMessage, ResultBlock } from "@/lib/chat-types";
-import { dashboardId, useSavedDashboards } from "@/lib/saved-dashboards";
+import { useSavedDashboards } from "@/lib/saved-dashboards";
 import { aiKey, useWorkspaces } from "@/lib/workspaces";
 import ChatTable from "./ChatTable";
 import { ArrowIcon, BulbIcon, CopyIcon } from "./icons";
@@ -21,10 +21,15 @@ const NOTICE_STYLE: Record<string, string> = {
   error: "border-red-200 bg-red-50 text-red-800",
 };
 
-export function Block({ block }: { block: ResultBlock }) {
+// savedId: set on the Favorites page, where the block IS one particular saved dashboard.
+// In the chat each block remembers the dashboard it saved itself, so asking the same question
+// again gives a fresh "Save Dashboard" button and can be saved again.
+export function Block({ block, savedId }: { block: ResultBlock; savedId?: string }) {
   const [showTable, setShowTable] = useState(false);
-  const { saved, toggle } = useSavedDashboards();
-  const isSaved = saved.some((d) => d.id === dashboardId(block));
+  const { saved, add, remove } = useSavedDashboards();
+  const [mineId, setMineId] = useState<string | null>(null);
+  const currentId = savedId ?? mineId;
+  const isSaved = !!currentId && saved.some((d) => d.id === currentId);
   const { assign, unassign } = useWorkspaces();
   const [picking, setPicking] = useState(false);     // "Save Dashboard to Workspace" dialog
   const hasChart = block.charts.length > 0;
@@ -77,7 +82,7 @@ export function Block({ block }: { block: ResultBlock }) {
           <div className="flex justify-end">
             <button type="button" aria-pressed={isSaved}
                     onClick={() => {
-                      if (isSaved) { toggle(block); unassign(aiKey(dashboardId(block))); }
+                      if (isSaved && currentId) { remove(currentId); unassign(aiKey(currentId)); setMineId(null); }
                       else setPicking(true);
                     }}
                     className="inline-flex items-center gap-1.5 rounded-md bg-brand px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-dark">
@@ -90,8 +95,9 @@ export function Block({ block }: { block: ResultBlock }) {
               itemTitle={block.title}
               onClose={() => setPicking(false)}
               onSave={(wsId) => {
-                if (!isSaved) toggle(block);
-                assign(aiKey(dashboardId(block)), wsId);
+                const id = add(block);
+                setMineId(id);
+                assign(aiKey(id), wsId);
                 setPicking(false);
               }} />
           )}

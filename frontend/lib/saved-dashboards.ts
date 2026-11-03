@@ -18,12 +18,14 @@ export interface SavedDashboard {
   block: ResultBlock;
 }
 
-/** Same question + same result = same dashboard, so saving twice cannot duplicate it. */
+/** Every save is its own saved dashboard (the demo lets the same answer be saved as often as wanted),
+ *  so each save gets a fresh id: the content hash plus a unique suffix. */
 export function dashboardId(block: ResultBlock): string {
   const s = `${block.title}|${JSON.stringify(block.spec ?? {})}`;
   let h = 5381;
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
-  return `${block.title}:${(h >>> 0).toString(36)}`;
+  const unique = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+  return `${block.title}:${(h >>> 0).toString(36)}:${unique}`;
 }
 
 function read(): string {
@@ -56,13 +58,7 @@ export function useSavedDashboards() {
   const raw = useSyncExternalStore(subscribe, read, () => "[]");
   const saved = useMemo(() => parse(raw), [raw]);
 
-  /** Save the block, or remove it if it is already saved. */
-  const toggle = useCallback((block: ResultBlock) => {
-    const id = dashboardId(block);
-    const current = parse(read());
-    const next = current.some((d) => d.id === id)
-      ? current.filter((d) => d.id !== id)
-      : [...current, { id, title: block.title, savedAt: Date.now(), block }];
+  const write = (next: SavedDashboard[]) => {
     memory = JSON.stringify(next);
     try {
       window.localStorage.setItem(KEY, memory);
@@ -70,7 +66,19 @@ export function useSavedDashboards() {
       /* storage blocked or full - the memory copy keeps it working this session */
     }
     window.dispatchEvent(new Event(EVENT));
+  };
+
+  /** Save the block as a new saved dashboard (always a new one) and return its id. */
+  const add = useCallback((block: ResultBlock): string => {
+    const id = dashboardId(block);
+    write([...parse(read()), { id, title: block.title, savedAt: Date.now(), block }]);
+    return id;
   }, []);
 
-  return { saved, toggle };
+  /** Remove one saved dashboard by id. */
+  const remove = useCallback((id: string) => {
+    write(parse(read()).filter((d) => d.id !== id));
+  }, []);
+
+  return { saved, add, remove };
 }
