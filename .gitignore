@@ -50,3 +50,4 @@ build/
 *.xlsx
 *.xls
 *.csv
+_backup_*/
