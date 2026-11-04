@@ -30,23 +30,32 @@ export default function EntityDetail({
   onHome: () => void; onExplorer: () => void;
   onDrill: (path: string[]) => void; onTree: (path: string[]) => void;
 }) {
-  const [view, setView] = useState<RcaEntityView | null>(null);
-  const [an, setAn] = useState<RcaAnalysis | null>(null);
-  const [err, setErr] = useState<string | null>(null);
   const [pickDim, setPickDim] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
 
+  // The result is stored together with the request it answers, so nothing from an earlier entity is ever shown
+  // (state is only set when a response arrives, never at the start of the effect).
+  const reqKey = [params.metric, params.month, params.compare, JSON.stringify(filters), dim, segment].join("#");
+  const [res, setRes] = useState<{ key: string; view: RcaEntityView | null; an: RcaAnalysis | null; err: string | null } | null>(null);
+  const cur = res?.key === reqKey ? res : null;
+  const view = cur?.view ?? null;
+  const an = cur?.an ?? null;
+  const err = cur?.err ?? null;
+
+  // A different entity or period starts with no picked view (adjusted while rendering, not in an effect).
+  const [seenKey, setSeenKey] = useState(reqKey);
+  if (seenKey !== reqKey) { setSeenKey(reqKey); setPickDim(null); }
+
   useEffect(() => {
     const ac = new AbortController();
-    setView(null); setAn(null); setErr(null); setPickDim(null);
     Promise.all([
       fetchRcaEntity(params, filters, dim, segment, ac.signal),
       fetchRcaAnalysis(params, filters, [`${dim}:${segment}`], ac.signal),
-    ]).then(([v, a]) => { setView(v); setAn(a); })
-      .catch((e) => { if (e.name !== "AbortError") setErr(String(e.message ?? e)); });
+    ]).then(([v, a]) => setRes({ key: reqKey, view: v, an: a, err: null }))
+      .catch((e) => { if (e.name !== "AbortError") setRes({ key: reqKey, view: null, an: null, err: String(e.message ?? e) }); });
     return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.metric, params.month, params.compare, filters, dim, segment]);
+  }, [reqKey]);
 
   // Dimensions ordered by how sharply they concentrate this entity's change (share of its own change).
   const dims = useMemo(() => {

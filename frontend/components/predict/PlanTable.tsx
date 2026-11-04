@@ -10,6 +10,7 @@ export interface Col {
   align?: "left" | "right";
   render: (r: LineRow) => React.ReactNode;
   sort: (r: LineRow) => number | string;     // value used for sorting
+  sortable?: boolean;                         // default true; false for action columns
 }
 
 export function StatusPill({ status }: { status: string }) {
@@ -71,7 +72,11 @@ export default function PlanTable({ rows, cols, onPick, pageSize = 12, total, mo
         <table className="w-full text-sm">
           <thead className="bg-slate-50">
             <tr>
-              {cols.map((c) => (
+              {cols.map((c) => c.sortable === false ? (
+                <th key={c.key} scope="col" className={`whitespace-nowrap px-3 py-2 font-medium text-slate-600 ${c.align === "right" ? "text-right" : "text-left"}`}>
+                  {c.label}
+                </th>
+              ) : (
                 <th key={c.key} scope="col" aria-sort={sortKey === c.key ? (asc ? "ascending" : "descending") : "none"}
                     className={`cursor-pointer select-none whitespace-nowrap px-3 py-2 font-medium text-slate-600 hover:bg-slate-100 ${c.align === "right" ? "text-right" : "text-left"}`}
                     onClick={() => toggle(c.key)}>

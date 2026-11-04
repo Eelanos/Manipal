@@ -2,7 +2,7 @@ import type { PredictOptions } from "@/lib/predict-types";
 import { inrFull } from "@/lib/format";
 import type { Col } from "./PlanTable";
 import { StatusPill } from "./PlanTable";
-import { coverText, dec1, num } from "./shared";
+import { coverText, dec1, num, type OnPickItem } from "./shared";
 
 // Column sets for the two tables. `opts` supplies the horizon used to label capped cover.
 const item: Col = { key: "item", label: "Item", render: (r) => <span className="font-medium text-slate-900">{r.item_name}</span>, sort: (r) => r.item_name };
@@ -42,3 +42,21 @@ export const excessCols = (opts: PredictOptions | null): Col[] => [
   { key: "exq", label: "Excess qty", align: "right", render: (r) => num(r.excess_qty), sort: (r) => r.excess_qty },
   { key: "exv", label: "Excess value", align: "right", render: (r) => <b className="text-slate-900">{inrFull(r.excess_value)}</b>, sort: (r) => r.excess_value },
 ];
+
+// Compact view for the half-width card: item, unit, status, the quantity, and a button that opens
+// the same drill-down a row click opens. Quantity columns are the full tables' own definitions.
+const byKey = (cols: Col[], key: string): Col => cols.find((c) => c.key === key)!;
+
+const viewMore = (onPick: OnPickItem): Col => ({
+  key: "view", label: "Details", align: "right", sortable: false, sort: () => 0,
+  render: (r) => (
+    <button type="button" onClick={(e) => { e.stopPropagation(); onPick(r); }} onKeyDown={(e) => { if (e.key === "Enter") e.stopPropagation(); }}
+            aria-label={`View more about ${r.item_name} at ${r.unit_name}`}
+            className="whitespace-nowrap rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100">
+      View more
+    </button>
+  ),
+});
+
+export const reorderCompactCols = (onPick: OnPickItem): Col[] => [item, unit, status, byKey(reorderCols(null), "qty"), viewMore(onPick)];
+export const excessCompactCols = (onPick: OnPickItem): Col[] => [item, unit, status, byKey(excessCols(null), "exq"), viewMore(onPick)];

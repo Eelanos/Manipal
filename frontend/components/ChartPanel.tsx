@@ -12,6 +12,7 @@ import DrilldownDonut from "./DrilldownDonut";
 import DrilldownUnitModal from "./DrilldownUnitModal";
 import DrilldownTable from "./DrilldownTable";
 import ExpiryDrilldown from "./ExpiryDrilldown";
+import ExpiryTrendChart from "./ExpiryTrendChart";
 
 // Qber palette: dark teal, red, blue, cyan, orange, purple, green, light cyan.
 // Single-series bars take the first colour; the reference line stays red.
@@ -50,6 +51,10 @@ export default function ChartPanel({ spec }: { spec: ChartSpec }) {
   const names = spec.series.map((s) => s.name);
   const data = mergeSeries(spec);
   const horizontal = spec.type === "hbar";
+  // Expiry Risk Trend is drawn as a left/right (Near Expiry | Expiry) month-by-month chart.
+  // Slow Moving Inventory Trend sits beside the (taller) Expiry Risk chart: let its plot use the extra height.
+  const fill = spec.id === "non_moving_trend";
+  const butterfly = spec.id === "expiry_risk" && names.includes("Near Expiry") && names.includes("Expiry");
   // Recharts' default [0, auto] domain mis-draws all-negative bars (they hang from a non-zero edge and
   // look shorter than they are). Only when a series has negatives, anchor the axis so zero is always inside it.
   const hasNegative = data.some((row) => names.some((n) => Number(row[n]) < 0));
@@ -72,11 +77,17 @@ export default function ChartPanel({ spec }: { spec: ChartSpec }) {
   const rightFmt = rightIdx >= 0 ? makeFormatter(spec.series[rightIdx].value_format ?? spec.value_format) : fmt;
 
   return (
-    <div className="chart-card rounded-lg border border-slate-200 bg-white p-4">
+    <div className={`chart-card rounded-lg border border-slate-200 bg-white p-4 ${fill ? "flex flex-col" : ""}`}>
       {/* Heading matches the legend below: same size, same weight, non-bold. */}
       <h3 className={`${spec.hint ? "mb-1" : "mb-4"} text-xs font-normal text-slate-700`}>{spec.title}</h3>
       {spec.hint && <p className="mb-3 text-[11px] text-slate-400">{spec.hint}</p>}
-      <ResponsiveContainer width="100%" height={horizontal ? 360 : 280}>
+      {butterfly ? (
+        <ExpiryTrendChart rows={data as { x: string; [k: string]: string | number }[]}
+                          nearColor={colorOf(names.indexOf("Near Expiry"))} expColor={colorOf(names.indexOf("Expiry"))}
+                          onPick={setDrillMonth} clickable={!!spec.drilldown} />
+      ) : (
+      <div className={fill ? "min-h-0 flex-1" : undefined} style={fill ? { minHeight: 280 } : undefined}>
+      <ResponsiveContainer width="100%" height={fill ? "100%" : horizontal ? 360 : 280}>
         {spec.type === "combo" ? (
           // First series renders as bars, the rest as lines - one convention,
           // used consistently (actual as bars, BUD as the line).
@@ -170,6 +181,8 @@ export default function ChartPanel({ spec }: { spec: ChartSpec }) {
           </BarChart>
         )}
             </ResponsiveContainer>
+      </div>
+      )}
       {spec.drilldown && drillMonth && (
         spec.id === "expiry_risk" ? (
           // Double drill-down: month -> units -> departments.

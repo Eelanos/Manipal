@@ -6,7 +6,7 @@ import {
 } from "recharts";
 import { inrFull } from "@/lib/format";
 import { fetchPredictItem } from "@/lib/predict-api";
-import type { ItemDetail, PredictOptions } from "@/lib/predict-types";
+import type { ItemDetail, PlanSettings, PredictOptions } from "@/lib/predict-types";
 import type { FilterState } from "@/lib/types";
 import Modal from "./Modal";
 import { StatusPill } from "./PlanTable";
@@ -21,21 +21,21 @@ function Fact({ label, value, hint }: { label: string; value: React.ReactNode; h
   );
 }
 
-export default function ItemModal({ target, filters, options, onClose }: {
-  target: { item_id: string; unit_id: string }; filters: FilterState;
+export default function ItemModal({ target, filters, plan, options, onClose }: {
+  target: { item_id: string; unit_id: string }; filters: FilterState; plan: PlanSettings;
   options: PredictOptions | null; onClose: () => void;
 }) {
   // Answer tagged with its request, so a previous item is never shown for a new one.
-  const key = useMemo(() => JSON.stringify([filters, target]), [filters, target]);
+  const key = useMemo(() => JSON.stringify([filters, plan, target]), [filters, plan, target]);
   const [res, setRes] = useState<{ key: string; d: ItemDetail | null; err: string | null } | null>(null);
 
   useEffect(() => {
     const ac = new AbortController();
-    fetchPredictItem(filters, target.item_id, target.unit_id, ac.signal)
+    fetchPredictItem(filters, plan, target.item_id, target.unit_id, ac.signal)
       .then((d) => setRes({ key, d, err: null }))
       .catch((e) => { if (e.name !== "AbortError") setRes({ key, d: null, err: String(e.message ?? e) }); });
     return () => ac.abort();
-  }, [filters, target, key]);
+  }, [filters, plan, target, key]);
   const cur = res && res.key === key ? res : null;
   const d = cur?.d ?? null;
   const err = cur?.err ?? null;
@@ -60,7 +60,7 @@ export default function ItemModal({ target, filters, options, onClose }: {
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Fact label="Usable stock" value={num(f.on_hand)} hint="Stock on the shelf at the snapshot date that has not expired" />
-            <Fact label="On order" value={num(f.on_order)} hint="Already ordered, not yet received (purchase orders with status In-Transit)" />
+            <Fact label="On order" value={num(f.on_order)} hint="Already ordered and on its way, not yet received (stock in transit)" />
             <Fact label="Daily usage" value={dec1(f.daily_usage)} hint="Average units used per day over the usage window" />
             {f.expired_qty > 0 && <Fact label="Expired (not usable)" value={num(f.expired_qty)} />}
             <Fact label="Days of cover" value={coverText(f.cover_days, f.cover_capped, options)} hint="Days until the usable stock on hand is used up (open orders not counted)" />

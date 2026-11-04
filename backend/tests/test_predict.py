@@ -14,6 +14,7 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import DATA_END, DATA_START
 from app.data_loader import DataStore, get_store
 from app.filters import ALL, Filters
 from app.main import app
@@ -22,6 +23,8 @@ from app.predict import params as P
 
 client = TestClient(app)
 STORE = get_store()
+# Position of each KPI card in the response (the page shows them in this order).
+EXCESS, EXPIRY, DEMAND, ORDER, STOCKOUT = 0, 1, 2, 3, 4
 NOSEAS = replace(P.default_params(), seasonality=False)
 
 
@@ -47,8 +50,9 @@ def test_usage_cover_reorder_order_match_raw_pandas():
     inv = STORE.inventory
     inv = inv[(inv.Date == plan.snapshot) & (inv.Expiry_Date > plan.snapshot)]      # expired stock is not usable
     inv = inv.groupby(["Unit_ID", "Item_ID"]).Stock_Qty.sum()
-    po = STORE.purchase
-    po = po[(po.Status == P.OPEN_PO_STATUS) & (po.PO_Date <= plan.snapshot)].groupby(["Unit_ID", "Item_ID"]).Qty.sum()
+    # on order = the in-transit quantity recorded with the stock snapshot (all batch rows, expired or not)
+    snap_rows = STORE.inventory[STORE.inventory.Date == plan.snapshot]
+    po = snap_rows.groupby(["Unit_ID", "Item_ID"]).In_Transit_Qty.sum()
     L = plan.lines.set_index(["Unit_ID", "Item_ID"])
     assert len(L) > 0
     for key, r in L.iterrows():
@@ -200,8 +204,10 @@ def test_forecast_origin_ignores_later_months():
 def test_backtest_range_needs_enough_samples():
     ov = engine.build_overview(STORE, Filters(), P.default_params())
     f = ov["forecast"]
-    assert f["range_available"] and f["accuracy_pct"] is not None
-    assert 0 < f["accuracy_pct"] <= 100
+    assert f["accuracy_pct"] is not None and 0 < f["accuracy_pct"] <= 100
+    for x in f["points"]:
+        if x["forecast"] is not None and f["range_available"]:
+            assert x["low"] <= x["forecast"] * 1.0000001 and x["high"] >= x["forecast"] * 0.9999999
 
 
 # ---- 5. filters ---------------------------------------------------------------
@@ -214,8 +220,8 @@ def test_unit_filter_narrows_and_department_only_changes_demand():
     a = engine.build_overview(STORE, Filters(), p)
     b = engine.build_overview(STORE, Filters(department=dept), p)
     assert a["reorder"]["total"] == b["reorder"]["total"]            # planning ignores Department
-    assert [k["value"] for k in a["kpis"][:4]] == [k["value"] for k in b["kpis"][:4]]
-    assert b["kpis"][4]["value"] < a["kpis"][4]["value"]            # demand follows it
+    assert [k["value"] for i, k in enumerate(a["kpis"]) if i != DEMAND] == [k["value"] for i, k in enumerate(b["kpis"]) if i != DEMAND]
+    assert b["kpis"][DEMAND]["value"] < a["kpis"][DEMAND]["value"]            # demand follows it
     assert b["department_note"] is True and a["department_note"] is False
     g = engine.compute_plan(STORE, Filters(stock_take_group="Pharmacy"), p).lines
     assert set(g.group) == {"Pharmacy"}
@@ -225,7 +231,7 @@ def test_groups_add_up_to_the_whole_when_seasonality_is_off():
     p = NOSEAS
     t = engine.build_overview(STORE, Filters(), p)
     parts = [engine.build_overview(STORE, Filters(stock_take_group=g), p) for g in ("Pharmacy", "General Store")]
-    for i in range(4):
+    for i in (EXCESS, EXPIRY, ORDER, STOCKOUT):
         assert sum(x["kpis"][i]["value"] for x in parts) == pytest.approx(t["kpis"][i]["value"])
 
 
@@ -240,7 +246,7 @@ def test_period_filter_is_ignored():
 def test_empty_scope_is_graceful():
     ov = engine.build_overview(STORE, Filters(unit="NO_SUCH_UNIT"), P.default_params())
     assert ov["empty"] and ov["row_count"] == 0
-    assert all(k["value"] == 0 for k in ov["kpis"][:4])
+    assert all(k["value"] == 0 for i, k in enumerate(ov["kpis"]) if i != DEMAND)
     assert ov["reorder"]["rows"] == [] and ov["insights"]
     json.dumps(ov, allow_nan=False)
 
@@ -356,9 +362,12 @@ def test_api_validation_and_defaults():
 def test_every_setting_moves_the_right_numbers():
     base = engine.build_overview(STORE, Filters(), P.default_params())
     longer = engine.build_overview(STORE, Filters(), replace(P.default_params(), lead_days=30))
-    assert longer["kpis"][0]["value"] >= base["kpis"][0]["value"]          # more lines need ordering
+    assert longer["kpis"][ORDER]["value"] >= base["kpis"][ORDER]["value"]          # more lines need ordering
     bigger_cover = engine.build_overview(STORE, Filters(), replace(P.default_params(), max_cover_days=365))
-    assert bigger_cover["kpis"][2]["value"] <= base["kpis"][2]["value"]    # less counted as excess
+    assert bigger_cover["kpis"][EXCESS]["value"] == base["kpis"][EXCESS]["value"]    # inventory value does not depend on settings
+    assert bigger_cover["kpis"][EXCESS]["note"] != base["kpis"][EXCESS]["note"]       # but the excess quoted under it does
+    assert (engine.compute_plan(STORE, Filters(), replace(P.default_params(), max_cover_days=365)).lines["excess_value"].sum()
+            <= engine.compute_plan(STORE, Filters(), P.default_params()).lines["excess_value"].sum())    # less counted as excess
     longer_window = engine.build_overview(STORE, Filters(), replace(P.default_params(), window_months=12))
     assert longer_window["settings"]["window_months"] == 12
 
@@ -368,12 +377,14 @@ def test_works_for_all_units_not_just_pune_and_goa(monkeypatch):
     import app.data_loader as dl
     every = pd.read_parquet(dl.PARQUET_DIR / "Unit_Master.parquet")["Unit_ID"].tolist()
     assert len(every) > 2
+    monkeypatch.setattr(dl, "ACTIVE_UNITS", ["H010", "H011"])           # the old two-unit demo scope
+    two = DataStore()
     monkeypatch.setattr(dl, "ACTIVE_UNITS", every)
     full = DataStore()
     p = P.default_params()
     ov = engine.build_overview(full, Filters(), p)
     units = {r["unit_id"] for r in ov["reorder"]["rows"] + ov["excess"]["rows"]}
-    assert len(units) > 2 and ov["row_count"] > engine.compute_plan(STORE, Filters(), p).lines.shape[0]
+    assert len(units) > 2 and ov["row_count"] > engine.build_overview(two, Filters(), p)["row_count"]
     assert {u["Unit_ID"] for u in full.unit_options} == set(every)
     one = engine.build_overview(full, Filters(unit=every[-1]), p)
     assert one["scope"] == every[-1] and one["row_count"] > 0
@@ -385,8 +396,72 @@ def test_status_drilldown_matches_donut_and_rows():
     ov = client.get("/api/predict/overview").json()
     for h in ov["health"]:
         d = client.get("/api/predict/status", params={"status": h["status"]}).json()
-        assert d["total"] == h["lines"] == len(d["rows"])
+        assert d["total"] == h["lines"] and len(d["rows"]) == min(d["total"], P.MAX_TABLE_ROWS)
+        assert d["more"] == (d["total"] > P.MAX_TABLE_ROWS)
         assert all(r["status"] == h["status"] for r in d["rows"])
         assert abs(d["stock_value"] - h["stock_value"]) <= 1
         assert h["rule"] and d["rule"] == h["rule"]
     assert client.get("/api/predict/status", params={"status": "Nope"}).status_code == 404
+
+
+def test_kpi_cards_come_in_the_page_order_and_default_delivery_is_two_days():
+    ov = client.get("/api/predict/overview").json()
+    labels = [k["label"] for k in ov["kpis"]]
+    assert labels[EXCESS].startswith("Inventory,") and labels[EXPIRY] == "Expiry at risk"
+    assert labels[DEMAND].startswith("Demand") and labels[ORDER] == "Items to order now" and labels[STOCKOUT] == "Stock-out risk"
+    assert ov["settings"]["lead_days"] == 2 == P.default_params().lead_days
+    assert ov["kpis"][STOCKOUT]["note"] == "Out of stock within 2 days"
+    # the stock-out count is exactly the Critical status, which is "usable stock lasts under the delivery time"
+    assert ov["kpis"][STOCKOUT]["value"] == next(h["lines"] for h in ov["health"] if h["status"] == P.STATUS_CRITICAL)
+
+
+# ---- where "on order" comes from -------------------------------------------------
+def test_on_order_default_is_stock_in_transit_and_matches_inventory_page():
+    plan = engine.compute_plan(STORE, Filters(), P.default_params())
+    snap = STORE.inventory[STORE.inventory.Date == plan.snapshot]
+    assert P.ON_ORDER_SOURCE == "inventory" and engine.on_order_source(STORE) == "inventory"
+    assert plan.lines["on_order"].sum() == pytest.approx(float(snap.In_Transit_Qty.sum()))
+    assert plan.lines["on_order"].sum() > 0
+    # same quantity the Inventory Analysis dashboard values as "in transit" (it sums In_Transit_Value)
+    assert snap.In_Transit_Value.sum() > 0
+    assert any("stock in transit" in n for n in engine.build_overview(STORE, Filters(), P.default_params())["notes"])
+
+
+def test_purchase_source_ignores_stale_in_transit_orders(monkeypatch):
+    """Purchase-order mode: an order still In-Transit for far longer than OPEN_PO_MAX_AGE_DAYS must not count."""
+    monkeypatch.setattr(P, "ON_ORDER_SOURCE", "purchase")
+    engine.clear_cache()
+    assert engine.on_order_source(STORE) == "purchase"
+    plan = engine.compute_plan(STORE, Filters(), P.default_params())
+    snap = plan.snapshot
+    po = STORE.purchase
+    po = po[(po.Status == P.OPEN_PO_STATUS) & (po.PO_Date <= snap)
+            & (po.PO_Date >= pd.Timestamp(DATA_START)) & (po.PO_Date <= pd.Timestamp(DATA_END))]
+    fresh = po[po.PO_Date >= snap - pd.Timedelta(days=P.OPEN_PO_MAX_AGE_DAYS)]
+    assert plan.lines["on_order"].sum() == pytest.approx(float(fresh.Qty.sum()))
+    # lifting the age limit counts them: the rule, and only the rule, removes them
+    monkeypatch.setattr(P, "OPEN_PO_MAX_AGE_DAYS", 100000)
+    engine.clear_cache()
+    plan_all = engine.compute_plan(STORE, Filters(), P.default_params())
+    assert plan_all.lines["on_order"].sum() == pytest.approx(float(po.Qty.sum()))
+    assert any("purchase orders" in n for n in engine.build_overview(STORE, Filters(), P.default_params())["notes"])
+
+
+def test_missing_in_transit_column_falls_back_to_purchase_orders():
+    class NoTransit:
+        inventory = STORE.inventory.drop(columns=["In_Transit_Qty"])
+    assert engine.on_order_source(NoTransit()) == "purchase"
+
+
+def test_inventory_value_card_matches_snapshot_and_quotes_excess():
+    """First card = total stock value on the snapshot date; the excess value is written under it."""
+    snap = engine.compute_plan(STORE, Filters(), P.default_params()).snapshot
+    for f in (Filters(), Filters(stock_take_group="Pharmacy")):
+        k = engine.build_overview(STORE, f, P.default_params())["kpis"][EXCESS]
+        raw = STORE.inventory[STORE.inventory["Date"] == snap]
+        if f.stock_take_group != "All":
+            raw = raw[raw["Stock Take Group"] == f.stock_take_group]
+        assert k["label"] == f"Inventory, {snap:%d %b %Y}"
+        assert k["value"] == pytest.approx(float(raw["Stock_Value"].sum()), rel=1e-9)
+        exc = engine.compute_plan(STORE, f, P.default_params()).lines["excess_value"].sum()
+        assert k["note"] == "Excess stock value " + engine.inr_compact(float(exc)).replace(" ", "\u00a0")

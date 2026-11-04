@@ -41,7 +41,7 @@ import pandas as pd
 
 from app.config import DATA_END, DATA_START, FORMULARY_TARGET_PCT, RCA_STOCK_CLASS_ORDER
 from app.filters import ALL, Filters, apply
-from app.rca.dims import DIMS, has_dim, seg_series
+from app.rca.dims import DIMS, dim_in_data, has_dim, seg_series
 
 TOTAL = "__total__"
 
@@ -212,9 +212,8 @@ class Measure:
         return len(labels)
 
     def dims_for(self, base_key: str) -> list[str]:
-        if base_key == "budget":
-            return [d for d in self.dims if d in BUDGET_DIMS]
-        return list(self.dims)
+        ds = [d for d in self.dims if d in BUDGET_DIMS] if base_key == "budget" else list(self.dims)
+        return [d for d in ds if dim_in_data(d)]
 
 
 # ---- SUM ------------------------------------------------------------------

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { inrFull } from "@/lib/format";
 import { fetchPredictStatus } from "@/lib/predict-api";
-import type { PredictOptions, StatusDetail } from "@/lib/predict-types";
+import type { PlanSettings, PredictOptions, StatusDetail } from "@/lib/predict-types";
 import type { FilterState } from "@/lib/types";
 import Modal from "./Modal";
 import PlanTable from "./PlanTable";
@@ -21,18 +21,18 @@ function Stat({ label, value }: { label: string; value: React.ReactNode }) {
 
 // Every item x unit line behind one slice of the stock-health donut. The count and
 // stock value shown here are the same numbers the donut shows for that slice.
-export default function StatusModal({ status, filters, options, onPick, onClose }: {
-  status: string; filters: FilterState; options: PredictOptions; onPick: OnPickItem; onClose: () => void;
+export default function StatusModal({ status, filters, plan, options, onPick, onClose }: {
+  status: string; filters: FilterState; plan: PlanSettings; options: PredictOptions; onPick: OnPickItem; onClose: () => void;
 }) {
   const [res, setRes] = useState<{ status: string; data: StatusDetail | null; error: string | null } | null>(null);
 
   useEffect(() => {
     const ac = new AbortController();
-    fetchPredictStatus(filters, status, ac.signal)
+    fetchPredictStatus(filters, plan, status, ac.signal)
       .then((d) => setRes({ status, data: d, error: null }))
       .catch((e) => { if (e.name !== "AbortError") setRes({ status, data: null, error: String(e.message ?? e) }); });
     return () => ac.abort();
-  }, [filters, status]);
+  }, [filters, plan, status]);
 
   const d = res && res.status === status ? res.data : null;
   const error = res && res.status === status ? res.error : null;

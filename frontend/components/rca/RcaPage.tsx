@@ -22,6 +22,8 @@ import FindingsExplorer from "./FindingsExplorer";
 import { type ControlsProps, ErrorBox } from "./RcaShell";
 import TreeScreen from "./TreeScreen";
 
+const NO_CAUSES: Record<string, TopCause | null> = {};
+
 type View =
   | { kind: "home" }
   | { kind: "explorer" }
@@ -41,9 +43,10 @@ export default function RcaPage() {
   const view = stack[stack.length - 1];
 
   const [lens, setLens] = useState<RcaLens | null>(null);
-  const [lensLoading, setLensLoading] = useState(false);
-  const [lensErr, setLensErr] = useState<string | null>(null);
-  const [causes, setCauses] = useState<Record<string, TopCause | null>>({});
+  const [lensDone, setLensDone] = useState<{ key: string; err: string | null } | null>(null);
+  // Top drivers are stored together with the entity list they belong to, so a new list starts with none.
+  const [causeState, setCauseState] = useState<{ lens: RcaLens | null; map: Record<string, TopCause | null> }>({ lens: null, map: {} });
+  const causes = causeState.lens === lens ? causeState.map : NO_CAUSES;
   const causeRun = useRef(0);
 
   // ---- navigation: a tiny stack so "Back" always returns to where you came from
@@ -70,49 +73,49 @@ export default function RcaPage() {
     key === "prior_month" ? monthInfo?.has_prior_month !== false
     : key === "same_month_last_year" ? monthInfo?.has_same_month_last_year !== false : true, [monthInfo]);
 
-  // Keep the comparison and the view valid when the metric or month changes.
-  useEffect(() => {
-    if (!m) return;
+  // Keep the comparison and the view valid when the metric or month changes. These are adjusted while rendering
+  // (each only fires when the current choice is no longer valid), not in effects.
+  if (m) {
     const ok = m.compares.filter((c) => compareOk(c.key));
     if (ok.length && !ok.some((c) => c.key === compare)) setCompare(ok[0].key);
-  }, [m, compare, compareOk]);
-
-  useEffect(() => {
-    if (!m || !lens) return;
+  }
+  if (m && lens) {
     const valid = lens.lenses.map((l) => l.key);
     if (valid.length && !valid.includes(lensKey)) setLensKey(valid.includes("unit") ? "unit" : valid[0]);
-  }, [lens, m, lensKey]);
-  useEffect(() => {
-    if (!m || !compare) return;
-    if (!m.dims.some((d) => d.key === lensKey)) setLensKey(m.dims.some((d) => d.key === "unit") ? "unit" : m.dims[0].key);
-  }, [m, lensKey, compare]);
+  }
+  if (m && compare && !m.dims.some((d) => d.key === lensKey)) setLensKey(m.dims.some((d) => d.key === "unit") ? "unit" : m.dims[0].key);
 
   // ---- load the entity list for the current controls (home + findings share it)
+  // `lensReq` identifies the request the current controls call for (null = nothing to load right now). The page is
+  // "loading" until that request has answered; the answer is recorded only when a response arrives.
   const showsLens = view.kind === "home" || view.kind === "explorer";
+  const lensReady = !!(options && metric && month && m && compare && showsLens
+    && m.compares.some((c) => c.key === compare) && compareOk(compare));
+  const lensReq = lensReady ? [metric, month, compare, lensKey, JSON.stringify(filters)].join("#") : null;
+  const lensLoading = lensReq !== null && lensDone?.key !== lensReq;
+  const lensErr = lensReq !== null && lensDone?.key === lensReq ? lensDone.err : null;
   useEffect(() => {
-    if (!options || !metric || !month || !m || !compare || !showsLens) return;
-    if (!m.compares.some((c) => c.key === compare) || !compareOk(compare)) return;
+    if (lensReq === null) return;
     const ac = new AbortController();
-    setLensLoading(true); setLensErr(null);
     fetchRcaLens({ metric, month, compare }, filters, lensKey, ac.signal)
-      .then((d) => { setLens(d); })
-      .catch((e) => { if (e.name !== "AbortError") { setLensErr(String(e.message ?? e)); } })
-      .finally(() => { if (!ac.signal.aborted) setLensLoading(false); });
+      .then((d) => { setLens(d); setLensDone({ key: lensReq, err: null }); })
+      .catch((e) => { if (e.name !== "AbortError") setLensDone({ key: lensReq, err: String(e.message ?? e) }); });
     return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [options, metric, month, compare, lensKey, filters, showsLens]);
+  }, [lensReq]);
 
   // ---- each card's top driver arrives separately so the cards themselves show at once
   useEffect(() => {
-    setCauses({});
     if (!lens || !options) return;
     const run = ++causeRun.current;
     const ac = new AbortController();
     const n = options.home_cards ?? 8;
+    const put = (segment: string, v: TopCause | null) =>
+      setCauseState((s) => ({ lens, map: { ...(s.lens === lens ? s.map : {}), [segment]: v } }));
     lens.entities.slice(0, n).forEach((e) => {
       fetchRcaCause({ metric: lens.metric.key, month: lens.period.month, compare: lens.compare.key }, filters, lens.lens.key, e.segment, ac.signal)
-        .then((r) => { if (run === causeRun.current) setCauses((c) => ({ ...c, [e.segment]: r.top_cause })); })
-        .catch(() => { if (run === causeRun.current && !ac.signal.aborted) setCauses((c) => ({ ...c, [e.segment]: null })); });
+        .then((r) => { if (run === causeRun.current) put(e.segment, r.top_cause); })
+        .catch(() => { if (run === causeRun.current && !ac.signal.aborted) put(e.segment, null); });
     });
     return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps

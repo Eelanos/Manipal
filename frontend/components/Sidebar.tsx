@@ -8,13 +8,13 @@ import { DASHBOARDS, PREDICT_NAV, RCA_NAV } from "@/lib/nav";
 
 // Nav item look: slate-blue sidebar, active item darker with a red left edge.
 const itemClass = (active: boolean) =>
-  `flex w-full items-center gap-3 rounded-r-md border-l-4 px-3 py-2 text-left text-sm ${
+  `flex w-full items-center gap-3 rounded-r-md border-l-4 px-3 py-1.5 text-left text-sm ${
     active
       ? "border-brand bg-nav-dark font-medium text-white"
       : "border-transparent text-slate-200 hover:bg-white/10"}`;
 
 const sectionClass =
-  "px-3 pb-1 pt-8 text-[11px] font-semibold uppercase tracking-wide text-slate-400";
+  "px-3 pb-1 pt-6 text-[11px] font-semibold uppercase tracking-wide text-slate-400";
 
 function NavLink({ href, icon, active, children }: {
   href: string; icon: NavIconName; active: boolean; children: React.ReactNode;
@@ -41,17 +41,22 @@ function NavButton({ icon, onClick, active = false, children }: {
   );
 }
 
-export default function Sidebar() {
-  const rawPath = usePathname();
-  // ChatDock announces when Ask QBER opens / closes. While it is open the chat is the page the
-  // user is on, so Ask QBER is the highlighted item and the page underneath is not.
-  const [chatOpen, setChatOpen] = useState(false);
-  useEffect(() => {
-    const onState = (e: Event) => setChatOpen(!!(e as CustomEvent<{ open: boolean }>).detail?.open);
-    window.addEventListener("qber:chat-state", onState);
-    return () => window.removeEventListener("qber:chat-state", onState);
-  }, []);
-  const path = chatOpen ? null : rawPath;
+   // "Apr 2024" from an ISO date. Read as UTC so the month cannot shift with the viewer's time zone.
+   const monthYear = (iso: string) =>
+     new Date(iso).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+
+   // `dates` is the data range from /api/filter-options, so the footer never goes stale when the data changes.
+   export default function Sidebar({ dates }: { dates?: { min: string; max: string } | null }) {
+     const rawPath = usePathname();
+     // ChatDock announces when Ask QBER opens / closes. While it is open the chat is the page the
+     // user is on, so Ask QBER is the highlighted item and the page underneath is not.
+     const [chatOpen, setChatOpen] = useState(false);
+     useEffect(() => {
+       const onState = (e: Event) => setChatOpen(!!(e as CustomEvent<{ open: boolean }>).detail?.open);
+       window.addEventListener("qber:chat-state", onState);
+       return () => window.removeEventListener("qber:chat-state", onState);
+     }, []);
+     const path = chatOpen ? null : rawPath;
 
   return (
     <aside className="flex w-64 shrink-0 flex-col bg-nav">
@@ -61,8 +66,8 @@ export default function Sidebar() {
         <p className="mt-1 text-xs text-red-100">For Hospitals</p>
       </div>
 
-      <nav className="flex-1 overflow-y-auto p-3">
-        <p className={`${sectionClass} !pt-4`}>Analytics</p>
+      <nav className="flex-1 overflow-y-auto p-2">
+        <p className={`${sectionClass} !pt-2`}>Analytics</p>
         <div className="space-y-0.5">
           {DASHBOARDS.map((d) => (
             <NavLink key={d.slug} href={`/${d.slug}`}
@@ -106,11 +111,11 @@ export default function Sidebar() {
         </div>
       </nav>
 
-      <div className="border-t border-white/10 px-5 py-3">
+      <div className="border-t border-white/10 px-5 py-2.5">
         <p className="text-[11px] leading-tight text-slate-400">
           Demo environment &middot; synthetic data
           <br />
-          Jan 2025 &ndash; Dec 2026
+          {dates ? `${monthYear(dates.min)} \u2013 ${monthYear(dates.max)}` : "\u00a0"}
         </p>
       </div>
     </aside>

@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import type { FilterOptions, FilterState } from "@/lib/types";
 
 const PRESET_LABELS: Record<string, string> = {
@@ -23,6 +24,9 @@ interface Props {
 // restore the rest later.
 export default function FilterBar({ options, value, onChange }: Props) {
   const units = options?.units ?? [];
+  // The Predictive Analysis page plans from the latest stock snapshot, so Period and
+  // Department do not apply there: only Unit and Product Group are shown on that page.
+  const predictive = usePathname()?.startsWith("/predictive-analysis") ?? false;
   const set = (patch: Partial<FilterState>) => onChange({ ...value, ...patch });
 
   const cls =
@@ -31,12 +35,12 @@ export default function FilterBar({ options, value, onChange }: Props) {
   const label = "mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500";
 
   const isFiltered =
-    value.unit !== "All" || value.department !== "All" ||
-    value.stock_take_group !== "All";
+    value.unit !== "All" || value.stock_take_group !== "All" ||
+    (!predictive && value.department !== "All");
 
   return (
     <div className="flex w-full items-end gap-4">
-      <div className="grid min-w-0 flex-1 grid-cols-4 gap-4">
+      <div className={`grid min-w-0 flex-1 gap-4 ${predictive ? "grid-cols-2" : "grid-cols-4"}`}>
         <div className="min-w-0">
           <label className={label}>Unit</label>
           <select className={cls} value={value.unit}
@@ -49,7 +53,7 @@ export default function FilterBar({ options, value, onChange }: Props) {
             ))}
           </select>
         </div>
-        <div className="min-w-0">
+        {!predictive && <div className="min-w-0">
           <label className={label}>Period</label>
           <select className={cls} value={value.preset}
                   onChange={(e) => set({ preset: e.target.value })}>
@@ -57,7 +61,7 @@ export default function FilterBar({ options, value, onChange }: Props) {
               <option key={p} value={p}>{PRESET_LABELS[p] ?? p}</option>
             ))}
           </select>
-        </div>
+        </div>}
         <div className="min-w-0">
           <label className={label}>Product Group</label>
           <select className={cls} value={value.stock_take_group}
@@ -66,20 +70,21 @@ export default function FilterBar({ options, value, onChange }: Props) {
             {options?.stock_take_groups.map((g) => <option key={g} value={g}>{g}</option>)}
           </select>
         </div>
-        <div className="min-w-0">
+        {!predictive && <div className="min-w-0">
           <label className={label}>Department</label>
           <select className={cls} value={value.department}
                   onChange={(e) => set({ department: e.target.value })}>
             <option value="All">All Departments</option>
             {options?.departments.map((d) => <option key={d} value={d}>{d}</option>)}
           </select>
-        </div>
+        </div>}
       </div>
       {isFiltered && (
         <button className="shrink-0 pb-2 text-xs text-brand underline hover:text-brand-dark"
                 onClick={() => onChange({
-                  ...value, unit: "All", department: "All",
-                  stock_take_group: "All",
+                  ...value, unit: "All", stock_take_group: "All",
+                  // Department is not on the Predictive page, so Clear all must not reset it there.
+                  ...(predictive ? {} : { department: "All" }),
                 })}>
           Clear all
         </button>
